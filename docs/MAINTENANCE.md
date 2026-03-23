@@ -12,7 +12,9 @@
 - 已增强重连处理，降低重连后无声和设备列表状态残留问题。
 - 已加入单实例启动行为。
 - 已加入可选启动通知、开机自启、播放音量和连接时自动压低其他应用音量。
-- 已加入输出设备选择配置与设备枚举，并切换为延迟安全尝试模式，当前继续收敛与首次连接音频建链的兼容性。
+- 已加入输出设备选择配置与设备枚举；当前实现改为双线并行：默认手动连接和自动重连固定走稳定播放主线，已连接时修改输出设备才进入实验热切线，先做 active session 确认，必要时最多执行一次软重连；打开设置页只允许刷新 UI，不得触发重连。
+- 当前诊断日志会额外记录会话对应的进程名、可执行路径和宿主类型，便于在干净环境中识别真实出声宿主。
+- 当前经验表明，连接链路上的重度会话诊断会干扰建链，因此会话快照仍仅保留在连接稳定后的输出设备设置变更场景，并合并为单次延迟快照；稳定播放主线不再受实验热切逻辑影响。
 - 已更新构建与发布流程，适配当前 Visual Studio 2022 和 GitHub Actions。
 
 ## 标签体系
@@ -37,7 +39,7 @@
 - `#35`、`#25`、`#40` Win11 与连接稳定性问题
 
 ### 高优先级计划
-- `#28`、`#31`、`#43` 输出设备选择兼容性收敛与延迟安全路由
+- `#28`、`#31`、`#43` 输出设备切换双阶段路由验证与真实宿主可控性研究
 - `#35`、`#25`、`#40` Win11 与连接稳定性问题
 
 ### 中优先级计划
@@ -64,6 +66,9 @@
 - 音量链路修复
 - 源端音量为 0 时的显式静音行为
 - 输出设备选择
+- 真实出声会话归属诊断
+- 输出设备切换双阶段路由验证
+- 真实播放宿主可控性研究
 - Win11 风格托盘设置和界面刷新
 - `v1.2.1+` 继续承接稳定性、兼容性和回归修复，不再维护独立 `v1.1.x` 分支。
 
@@ -95,7 +100,9 @@ This fork is the active maintenance branch for AudioPlaybackConnector.
 - Reconnect handling has been hardened to reduce no-audio reconnect failures and stale picker state.
 - Single-instance startup behavior has been added.
 - Optional startup notification, auto-start, playback volume, and ducking of other apps have been added.
-- Output device selection settings and device enumeration have been added, and routing now uses a delayed safe-attempt model while first-connect compatibility is still being stabilized.
+- Output device selection settings and device enumeration have been added; the current focus is researching whether the real playback host behind `AudioPlaybackConnection` exposes any controllable surface, so output switching remains diagnostic/research-only for now.
+- Current diagnostics also record the session process name, executable path, and host type so a clean capture can identify the real playback host more directly.
+- Current evidence shows that heavy session diagnostics on the connection path can interfere with connection establishment, so diagnostics are now limited to a single delayed snapshot after output-device changes while the connection is already stable.
 - The build and release workflow has been updated for current Visual Studio 2022 and GitHub Actions.
 
 ## Label Taxonomy
@@ -119,7 +126,7 @@ This fork is the active maintenance branch for AudioPlaybackConnector.
 - `#49` unstable volume
 
 ### Planned high priority
-- `#28`, `#31`, `#43` output device selection compatibility stabilization and delayed safe routing
+- `#28`, `#31`, `#43` real playback host identification and host controllability research
 - `#35`, `#25`, `#40` Windows 11 and connection reliability issues
 
 ### Planned medium priority
@@ -146,6 +153,8 @@ This fork is the active maintenance branch for AudioPlaybackConnector.
 - volume pipeline fixes
 - explicit mute behavior at zero source volume
 - output device selection
+- real playback session diagnostics
+- real playback host controllability research
 - Windows 11-style tray settings and visual refresh
 - `v1.2.1+` continues to carry stability, compatibility, and regression fixes; there is no separate `v1.1.x` maintenance line anymore.
 

@@ -28,6 +28,7 @@
 - 如果问题已经纳入路线图，加 `planned` 并指向维护路线文档中的对应章节。
 - 如果明显是平台限制，要明确说明，不要长期挂成“待修复”。
 - 如果只是重连不稳定的重复症状，统一关联到重连修复主线，尽量合并讨论。
+- 如果问题涉及输出设备切换，当前统一按“真实播放宿主定位 / 宿主可控性研究中”处理，并要求附上最新 `session-snapshot` / `session` 诊断日志。
 
 ## 发布前关闭检查
 关闭高优先级 issue 前，至少确认：
@@ -70,6 +71,7 @@ Apply `needs-info` until the report is reproducible enough to classify.
 - If the issue matches a planned roadmap item, add `planned` and link the relevant roadmap section.
 - If the issue is blocked by platform limitations, say that directly instead of leaving it open without context.
 - If the issue is a duplicate symptom of reconnect instability, link the reconnect work and consolidate discussion.
+- If the issue involves output-device switching, treat it as “real playback host identification / host controllability research” for now and ask for the latest `session-snapshot` / `session` diagnostic logs.
 
 ## Release Gate Checks
 Before closing a high-priority issue, confirm:

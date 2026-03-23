@@ -75,13 +75,14 @@ bool g_showStartupToast = false;
 double g_volume = 1.0;
 double g_duckedAppsVolume = 0.35;
 bool g_isRefreshingOutputDeviceComboBox = false;
+bool g_isProgrammaticOutputDeviceSelection = false;
 std::vector<std::wstring> g_lastDevices;
 std::vector<OutputDeviceInfo> g_outputDevices;
 std::wstring g_outputDeviceId;
 std::wstring g_activeOutputDeviceId;
-uint64_t g_outputRoutingGeneration = 0;
-uint64_t g_outputRoutingScheduledToken = 0;
-uint32_t g_outputRoutingAttemptCount = 0;
+uint64_t g_outputDeviceSnapshotToken = 0;
+uint64_t g_outputRoutingToken = 0;
+bool g_outputSwitchSoftReconnectInProgress = false;
 
 #include "Util.hpp"
 #include "I18n.hpp"

@@ -17,7 +17,8 @@ Windows 10 2004+ 蓝牙音频接收 (A2DP Sink) 连接工具。
 
 # 维护说明
 * 这个 fork 作为当前的活跃维护分支，优先处理稳定性、音频体验和构建发布问题。
-* 当前 `v1.2.x` 重点包含音量链路修复和输出设备选择；输出设备切换现已采用延迟安全尝试模式，`v1.1.0` 作为历史稳定性阶段保留。
+* 当前 `v1.2.x` 已完成音量链路修复；默认手动连接和自动重连现在固定走稳定播放主线。输出设备选择保留为“已连接时的实验热切线”：只在连接已建立后改 `Output device` 时，才会尝试 active session 确认和最多一次软重连；打开设置页只会刷新 UI，不会触发重连。
+* 当前稳定能力以连接、重连、音量和 ducking 为主，`v1.1.0` 作为历史稳定性阶段保留。
 * 路线图、已知限制和原仓库 issue 映射见 [docs/MAINTENANCE.md](docs/MAINTENANCE.md)。
 * issue 分诊规则和建议补充的信息见 [docs/ISSUE_TRIAGE.md](docs/ISSUE_TRIAGE.md)。
 
@@ -46,7 +47,8 @@ Microsoft added Bluetooth A2DP Sink support in Windows 10 version 2004, but a th
 
 ### Maintenance
 * This fork is the active maintenance branch focused on stability, audio experience, and release health.
-* The current `v1.2.x` line focuses on volume-pipeline fixes and output device selection; output routing now uses a delayed safe-attempt model, and `v1.1.0` remains the historical stability stage.
+* The current `v1.2.x` line includes the completed volume-pipeline fixes; normal manual connections and auto-reconnects now stay on the stable playback path. Output device selection remains an experimental hot-switch path that is only triggered when the user changes `Output device` while already connected, with active-session confirmation and at most one soft reconnect. Opening the settings flyout only refreshes UI state and must not trigger reconnects.
+* Stable capabilities currently center on connection, reconnect, volume, and ducking, while `v1.1.0` remains the historical stability stage.
 * Roadmap, known constraints, and upstream issue mapping are documented in [docs/MAINTENANCE.md](docs/MAINTENANCE.md).
 * Issue triage rules and required diagnostic info are documented in [docs/ISSUE_TRIAGE.md](docs/ISSUE_TRIAGE.md).
 
