@@ -3,7 +3,11 @@ name: Build
 on:
   push:
     tags:
-      - "**"
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -16,7 +20,7 @@ jobs:
             artifact_name: AudioPlaybackConnector64
             exe_path: x64/Release/AudioPlaybackConnector64.exe
             pdb_path: x64/Release/AudioPlaybackConnector64.pdb
-          - platform: Win32
+          - platform: x86
             artifact_name: AudioPlaybackConnector32
             exe_path: Release/AudioPlaybackConnector32.exe
             pdb_path: Release/AudioPlaybackConnector32.pdb
@@ -53,17 +57,101 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: windows-2022
+    environment: release
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
 
+      - name: Check GPG secrets
+        id: gpg_check
+        shell: powershell
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PRIVATE_KEY_B64: ${{ secrets.GPG_PRIVATE_KEY_B64 }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          $hasKey = -not [string]::IsNullOrWhiteSpace($env:GPG_PRIVATE_KEY) -or -not [string]::IsNullOrWhiteSpace($env:GPG_PRIVATE_KEY_B64)
+          $enabled = $hasKey -and -not [string]::IsNullOrWhiteSpace($env:GPG_PASSPHRASE)
+          if ($enabled) {
+            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "GPG signing enabled."
+          } else {
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "GPG signing skipped: missing secrets."
+          }
+
+      - name: Import GPG private key
+        id: gpg
+        if: steps.gpg_check.outputs.enabled == 'true'
+        shell: powershell
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PRIVATE_KEY_B64: ${{ secrets.GPG_PRIVATE_KEY_B64 }}
+        run: |
+          $keyFile = Join-Path $env:RUNNER_TEMP "audioplaybackconnector-signing.key.asc"
+
+          if (-not [string]::IsNullOrWhiteSpace($env:GPG_PRIVATE_KEY_B64)) {
+            $decoded = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:GPG_PRIVATE_KEY_B64))
+            Set-Content -Path $keyFile -Value $decoded -Encoding utf8
+          } else {
+            Set-Content -Path $keyFile -Value $env:GPG_PRIVATE_KEY -Encoding utf8
+          }
+
+          gpg --batch --import $keyFile
+
+          $secretKeyLines = gpg --batch --list-secret-keys --with-colons
+          $fprLine = $secretKeyLines | Where-Object { $_ -like "fpr:*" } | Select-Object -First 1
+          if (-not $fprLine) {
+            Write-Host "No secret key found after import."
+            throw "No GPG secret key fingerprint found."
+          }
+
+          $parts = $fprLine -split ':'
+          if ($parts.Length -lt 10 -or [string]::IsNullOrWhiteSpace($parts[9])) {
+            throw "Unable to parse GPG secret key fingerprint from: $fprLine"
+          }
+
+          $fpr = $parts[9]
+          "fingerprint=$fpr" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Imported GPG key fingerprint: $fpr"
+
+      - name: Sign release assets with GPG
+        if: steps.gpg.outputs.fingerprint != ''
+        shell: powershell
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_FPR: ${{ steps.gpg.outputs.fingerprint }}
+        run: |
+          Get-ChildItem "release-assets" -Recurse -File -Filter "*.exe" | ForEach-Object {
+            $asc = "$($_.FullName).asc"
+            if (Test-Path $asc) { Remove-Item $asc -Force }
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$env:GPG_PASSPHRASE" --local-user "$env:GPG_FPR" --armor --detach-sign "$($_.FullName)"
+          }
+
+      - name: Collect release file list
+        id: release_files
+        shell: powershell
+        run: |
+          $files = @(
+            "release-assets/AudioPlaybackConnector64/AudioPlaybackConnector64.exe",
+            "release-assets/AudioPlaybackConnector32/AudioPlaybackConnector32.exe",
+            "release-assets/AudioPlaybackConnectorARM64/AudioPlaybackConnectorARM64.exe",
+            "release-assets/AudioPlaybackConnectorARM/AudioPlaybackConnectorARM.exe"
+          )
+
+          $signatureFiles = Get-ChildItem "release-assets" -Recurse -File -Filter "*.asc" -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.FullName.Substring($PWD.Path.Length + 1).Replace('\', '/') }
+
+          $allFiles = @($files) + @($signatureFiles)
+          $allFiles = $allFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+          "files<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $allFiles | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: |
-            release-assets/AudioPlaybackConnector64/AudioPlaybackConnector64.exe
-            release-assets/AudioPlaybackConnector32/AudioPlaybackConnector32.exe
-            release-assets/AudioPlaybackConnectorARM64/AudioPlaybackConnectorARM64.exe
-            release-assets/AudioPlaybackConnectorARM/AudioPlaybackConnectorARM.exe
+          files: ${{ steps.release_files.outputs.files }}
