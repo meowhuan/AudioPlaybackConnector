@@ -16,7 +16,7 @@ void ShowTrayFlyout(Flyout);
 void ShowDevicePickerFromTray();
 void UpdateVolumeText();
 void UpdateDuckedAppsVolumeText();
-void ApplyOwnSessionVolume();
+void ApplyOwnSessionVolume(std::wstring_view);
 void ApplyDuckingPolicy();
 void RestoreDuckedSessions();
 void ShowInitialToastNotification();
@@ -59,6 +59,22 @@ namespace
 		wchar_t buffer[32];
 		swprintf_s(buffer, L"pid:%lu", processId);
 		return buffer;
+	}
+
+	void LogVolumeDiagnostics(std::wstring_view reason)
+	{
+		wchar_t buffer[256];
+		swprintf_s(
+			buffer,
+			L"[AudioPlaybackConnector] volume reason=%.*s target=%d mute=%d connections=%zu duck=%d\r\n",
+			static_cast<int>(reason.size()),
+			reason.data(),
+			static_cast<int>(std::lround(g_volume * 100.0)),
+			g_volume <= 0.0 ? 1 : 0,
+			g_audioPlaybackConnections.size(),
+			g_duckOtherApps ? 1 : 0
+		);
+		OutputDebugStringW(buffer);
 	}
 }
 
@@ -345,10 +361,12 @@ void UpdateDuckedAppsVolumeText()
 	}
 }
 
-void ApplyOwnSessionVolume()
+void ApplyOwnSessionVolume(std::wstring_view reason)
 {
 	try
 	{
+		LogVolumeDiagnostics(reason);
+
 		winrt::com_ptr<IMMDeviceEnumerator> deviceEnumerator;
 		THROW_IF_FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), deviceEnumerator.put_void()));
 
@@ -383,6 +401,8 @@ void ApplyOwnSessionVolume()
 			if (!simpleAudioVolume)
 				continue;
 
+			const auto mute = g_volume <= 0.0;
+			THROW_IF_FAILED(simpleAudioVolume->SetMute(mute ? TRUE : FALSE, nullptr));
 			THROW_IF_FAILED(simpleAudioVolume->SetMasterVolume(static_cast<float>(g_volume), nullptr));
 		}
 	}
@@ -597,7 +617,7 @@ void SetupSettingsFlyout()
 	g_volumeSlider.ValueChanged([](const auto&, const RangeBaseValueChangedEventArgs& args) {
 		g_volume = std::clamp(args.NewValue() / 100.0, 0.0, 1.0);
 		UpdateVolumeText();
-		ApplyOwnSessionVolume();
+		ApplyOwnSessionVolume(L"settings-slider");
 	});
 
 	g_volumeValueText = TextBlock();
@@ -767,6 +787,8 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 							g_devicePicker.SetDisplayStatus(it->second.first, _(L"Connected"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 						}
 					}
+					ApplyOwnSessionVolume(L"state-opened");
+					ApplyDuckingPolicy();
 				}
 				else if (state == AudioPlaybackConnectionState::Closed)
 				{
@@ -783,6 +805,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 					sender.Close();
 					if (g_audioPlaybackConnections.empty())
 					{
+						ApplyOwnSessionVolume(L"state-closed-empty");
 						RestoreDuckedSessions();
 					}
 				}
@@ -841,7 +864,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 		{
 			picker.SetDisplayStatus(device, _(L"Open requested"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 		}
-		ApplyOwnSessionVolume();
+		ApplyOwnSessionVolume(L"connect-success");
 		ApplyDuckingPolicy();
 	}
 	else
@@ -865,6 +888,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 		}
 		if (g_audioPlaybackConnections.empty())
 		{
+			ApplyOwnSessionVolume(L"connect-failure-empty");
 			RestoreDuckedSessions();
 		}
 		picker.SetDisplayStatus(device, errorMessage, DevicePickerDisplayStatusOptions::ShowRetryButton);
@@ -881,6 +905,7 @@ winrt::fire_and_forget DisconnectDevice(DevicePicker picker, DeviceInformation d
 		picker.SetDisplayStatus(device, {}, DevicePickerDisplayStatusOptions::None);
 		if (g_audioPlaybackConnections.empty())
 		{
+			ApplyOwnSessionVolume(L"disconnect-missing-empty");
 			RestoreDuckedSessions();
 		}
 		co_return;
@@ -900,6 +925,7 @@ winrt::fire_and_forget DisconnectDevice(DevicePicker picker, DeviceInformation d
 
 	if (g_audioPlaybackConnections.empty())
 	{
+		ApplyOwnSessionVolume(L"disconnect-empty");
 		RestoreDuckedSessions();
 	}
 }
