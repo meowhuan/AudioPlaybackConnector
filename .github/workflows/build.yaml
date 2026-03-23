@@ -42,6 +42,28 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Resolve Windows SDK
+        shell: powershell
+        run: |
+          $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10"
+          $sdkVersion = Get-ChildItem (Join-Path $sdkRoot "Include") -Directory |
+            Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1 -ExpandProperty Name
+          if (-not $sdkVersion) {
+            throw "No Windows SDK version found."
+          }
+
+          "TargetPlatformIdentifier=Windows" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TargetPlatformVersion=$sdkVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WindowsTargetPlatformVersion=$sdkVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WindowsSDKVersion=$sdkVersion\" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WindowsSdkDir=$sdkRoot\" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "UseOSWinMdReferences=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Write-Host "Resolved Windows SDK root: $sdkRoot"
+          Write-Host "Resolved Windows SDK version: $sdkVersion"
+
       - name: Build
         shell: powershell
         run: ./scripts/build.ps1 -Configuration Release -Platform ${{ matrix.platform }}

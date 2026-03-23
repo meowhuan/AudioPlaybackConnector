@@ -44,9 +44,14 @@ function Get-WindowsSdkVersion {
         throw "Windows 10 SDK not found."
     }
 
-    $sdkVersion = Get-ChildItem $sdkRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
+    $sdkVersion = Get-ChildItem $sdkRoot -Directory |
+        Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+        Sort-Object {
+            [version]$_.Name
+        } -Descending |
+        Select-Object -First 1 -ExpandProperty Name
     if (-not $sdkVersion) {
-        throw "No Windows 10 SDK versions found."
+        throw "No Windows 10 SDK version directories found."
     }
     return $sdkVersion
 }
@@ -144,7 +149,7 @@ try {
     Write-Host "Building $Configuration|$Platform..."
     Write-Host "Resolved SDK root: $windowsSdkRoot"
     Write-Host "Resolved SDK version: $windowsSdkVersion"
-    & $msbuild $solutionPath "/t:Build" "/p:Configuration=$Configuration;Platform=$Platform;TargetPlatformIdentifier=Windows;TargetPlatformVersion=$windowsSdkVersion;WindowsTargetPlatformVersion=$windowsSdkVersion;WindowsSDKVersion=$windowsSdkVersion\\;WindowsSdkDir=$windowsSdkRoot\\;UseOSWinMdReferences=true"
+    & $msbuild $solutionPath "/t:Build" "/p:Configuration=$Configuration;Platform=$Platform;DisableInstalledVCTargetsDefaultsUse=true;TargetPlatformIdentifier=Windows;TargetPlatformVersion=$windowsSdkVersion;WindowsTargetPlatformVersion=$windowsSdkVersion;WindowsSDKVersion=$windowsSdkVersion\\;WindowsSdkDir=$windowsSdkRoot\\;UseOSWinMdReferences=true"
     if ($LASTEXITCODE -ne 0) {
         throw "MSBuild failed."
     }
