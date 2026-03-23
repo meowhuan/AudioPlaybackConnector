@@ -51,6 +51,14 @@ function Get-WindowsSdkVersion {
     return $sdkVersion
 }
 
+function Get-WindowsSdkRoot {
+    $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10"
+    if (-not (Test-Path $sdkRoot)) {
+        throw "Windows SDK root not found."
+    }
+    return $sdkRoot
+}
+
 function Get-NuGetPath {
     $nugetCommand = Get-Command nuget.exe -ErrorAction SilentlyContinue
     if ($nugetCommand) {
@@ -113,11 +121,14 @@ function Invoke-TranslationGeneration {
 
 $nuget = Get-NuGetPath
 $msbuild = Get-MSBuildPath
+$windowsSdkRoot = Get-WindowsSdkRoot
 $windowsSdkVersion = Get-WindowsSdkVersion
 
 $env:TargetPlatformIdentifier = "Windows"
 $env:TargetPlatformVersion = $windowsSdkVersion
 $env:WindowsTargetPlatformVersion = $windowsSdkVersion
+$env:WindowsSDKVersion = "$windowsSdkVersion\"
+$env:WindowsSdkDir = "$windowsSdkRoot\"
 $env:UseOSWinMdReferences = "true"
 
 Push-Location $repoRoot
@@ -131,7 +142,9 @@ try {
     }
 
     Write-Host "Building $Configuration|$Platform..."
-    & $msbuild $solutionPath "/t:Build" "/p:Configuration=$Configuration;Platform=$Platform;TargetPlatformIdentifier=Windows;TargetPlatformVersion=$windowsSdkVersion;WindowsTargetPlatformVersion=$windowsSdkVersion"
+    Write-Host "Resolved SDK root: $windowsSdkRoot"
+    Write-Host "Resolved SDK version: $windowsSdkVersion"
+    & $msbuild $solutionPath "/t:Build" "/p:Configuration=$Configuration;Platform=$Platform;TargetPlatformIdentifier=Windows;TargetPlatformVersion=$windowsSdkVersion;WindowsTargetPlatformVersion=$windowsSdkVersion;WindowsSDKVersion=$windowsSdkVersion\\;WindowsSdkDir=$windowsSdkRoot\\;UseOSWinMdReferences=true"
     if ($LASTEXITCODE -ne 0) {
         throw "MSBuild failed."
     }
