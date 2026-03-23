@@ -126,7 +126,7 @@ try {
     }
 
     Write-Host "Building $Configuration|$Platform..."
-    & $msbuild $solutionPath "/t:Build" "/p:Configuration=$Configuration;Platform=$Platform;WindowsTargetPlatformVersion=$windowsSdkVersion"
+    & $msbuild $solutionPath "/t:Build" "/p:Configuration=$Configuration;Platform=$Platform;TargetPlatformIdentifier=Windows;TargetPlatformVersion=$windowsSdkVersion;WindowsTargetPlatformVersion=$windowsSdkVersion"
     if ($LASTEXITCODE -ne 0) {
         throw "MSBuild failed."
     }
