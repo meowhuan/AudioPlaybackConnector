@@ -125,12 +125,56 @@ jobs:
         run: |
           $keyFile = Join-Path $env:RUNNER_TEMP "audioplaybackconnector-signing.key.asc"
 
-          if (-not [string]::IsNullOrWhiteSpace($env:GPG_PRIVATE_KEY_B64)) {
-            $decoded = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:GPG_PRIVATE_KEY_B64))
-            Set-Content -Path $keyFile -Value $decoded -Encoding utf8
-          } else {
-            Set-Content -Path $keyFile -Value $env:GPG_PRIVATE_KEY -Encoding utf8
+          function Normalize-KeyText {
+            param(
+              [string]$Value
+            )
+
+            if ([string]::IsNullOrWhiteSpace($Value)) {
+              return $null
+            }
+
+            $normalized = $Value.Trim()
+            if ($normalized.StartsWith('"') -and $normalized.EndsWith('"')) {
+              $normalized = $normalized.Substring(1, $normalized.Length - 2)
+            }
+
+            if ($normalized.Contains('\n')) {
+              $normalized = $normalized -replace '\\n', "`n"
+            }
+            if ($normalized.Contains('\r')) {
+              $normalized = $normalized -replace '\\r', "`r"
+            }
+
+            return $normalized
           }
+
+          $candidateKeys = @()
+
+          if (-not [string]::IsNullOrWhiteSpace($env:GPG_PRIVATE_KEY_B64)) {
+            try {
+              $decoded = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:GPG_PRIVATE_KEY_B64))
+              $candidateKeys += ,(Normalize-KeyText $decoded)
+            } catch {
+              Write-Host "GPG_PRIVATE_KEY_B64 is present but could not be base64-decoded. Falling back to raw secret handling."
+              $candidateKeys += ,(Normalize-KeyText $env:GPG_PRIVATE_KEY_B64)
+            }
+          }
+
+          $candidateKeys += ,(Normalize-KeyText $env:GPG_PRIVATE_KEY)
+          $candidateKeys = $candidateKeys | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+          $keyText = $candidateKeys | Where-Object { $_ -match '-----BEGIN PGP PRIVATE KEY BLOCK-----' } | Select-Object -First 1
+          if (-not $keyText) {
+            Write-Host "No candidate secret contained a recognizable private key header."
+            Write-Host "GPG_PRIVATE_KEY length: $($env:GPG_PRIVATE_KEY.Length)"
+            Write-Host "GPG_PRIVATE_KEY_B64 length: $($env:GPG_PRIVATE_KEY_B64.Length)"
+            throw "No valid armored private key content found in GPG secrets."
+          }
+
+          [System.IO.File]::WriteAllText($keyFile, $keyText, [System.Text.UTF8Encoding]::new($false))
+          Write-Host "Prepared GPG key file. Length: $($keyText.Length)"
+          Write-Host "Key header preview: $($keyText.Split([Environment]::NewLine, [StringSplitOptions]::None)[0])"
 
           gpg --batch --import $keyFile
 
