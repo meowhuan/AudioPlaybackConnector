@@ -1,0 +1,70 @@
+name: Bug 报告
+description: 报告一个可复现的播放、连接或兼容性问题。
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题概述
+      description: 请描述你遇到的问题，以及你原本期望发生的行为。
+      placeholder: 手机重连后，应用显示“已连接”，但电脑没有声音。
+    validations:
+      required: true
+  - type: input
+    id: app_version
+    attributes:
+      label: 应用版本或提交
+      placeholder: v1.1.0 或 commit hash
+    validations:
+      required: true
+  - type: input
+    id: windows_version
+    attributes:
+      label: Windows 版本和构建号
+      placeholder: Windows 11 23H2 (22631.3155)
+    validations:
+      required: true
+  - type: input
+    id: source_device
+    attributes:
+      label: 音源设备型号
+      placeholder: iPhone 15、Pixel 8、Vivo X100、Windows 11 PC
+    validations:
+      required: true
+  - type: input
+    id: bluetooth_adapter
+    attributes:
+      label: 蓝牙适配器或驱动
+      placeholder: Intel AX210、ASUS BT400、主板内置蓝牙
+  - type: dropdown
+    id: output_device
+    attributes:
+      label: 当前音频是否输出到默认 Windows 音频设备？
+      options:
+        - 是
+        - 否
+        - 不确定
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 启动应用
+        2. 连接手机
+        3. 拿远后再回到范围内
+        4. 重新连接
+    validations:
+      required: true
+  - type: textarea
+    id: errors
+    attributes:
+      label: 错误信息、HRESULT 或截图
+      description: 如果有精确报错文本，请直接贴出。
+  - type: textarea
+    id: notes
+    attributes:
+      label: 其他补充信息
+      description: 请说明在断开重连或重启应用后，问题是否仍然存在。

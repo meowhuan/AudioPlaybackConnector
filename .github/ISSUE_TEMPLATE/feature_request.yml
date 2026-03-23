@@ -1,0 +1,39 @@
+name: 功能建议
+description: 提交一个增强需求，并说明你的使用场景。
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 当前问题或使用场景
+      description: 请说明你现在想做什么，以及目前缺少什么能力。
+      placeholder: 我希望把蓝牙音频输出到虚拟声卡，而不是默认输出设备。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的功能行为
+      description: 请描述你希望增加的功能。
+      placeholder: 在设置弹层中增加输出设备选择器。
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 功能领域
+      options:
+        - 音频
+        - 稳定性
+        - 界面
+        - 自动化
+        - 分发
+        - 兼容性
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 约束条件或已尝试的替代方案
+      description: 如与驱动、编码、第三方工具或 Windows 限制有关，请一并说明。
