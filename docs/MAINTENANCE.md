@@ -6,6 +6,7 @@
 - 优先处理稳定性、构建发布和回归风险。
 - 第二阶段补齐音量、输出路由和 Win11 体验。
 - 在核心体验稳定后，再推进自动化和分发完善。
+- 当前准备发布版本定为 `v1.2.0`，后续稳定性与兼容性修复继续在 `v1.2.x` 中推进。
 
 ## 当前 fork 已吸收的改动
 - 已增强重连处理，降低重连后无声和设备列表状态残留问题。
@@ -30,10 +31,10 @@
 - `#17` Don't allow multiple instances
 - `#37` 中与单实例启动相关的部分
 - `#42`、`#40`、`#19` 中与重连和状态残留相关的症状
-
-### 高优先级计划
 - `#50` 音量为 0 时仍有残余声
 - `#49` 音量忽大忽小
+
+### 高优先级计划
 - `#28`、`#31`、`#43` 输出设备选择
 - `#35`、`#25`、`#40` Win11 与连接稳定性问题
 
@@ -50,20 +51,21 @@
 - `#38` 通话功能
 
 ## 版本路线
-### v1.1.x 稳定性
+### 历史阶段：v1.1.0
 - CI、依赖恢复和发布流程健康
 - 重连修复和状态残留清理
 - Windows 11 兼容性修复
 - 无声问题排查与归档
 - ARM 构建所需旧版 SDK 选择策略
 
-### v1.2 体验增强
+### 当前发布线：v1.2.x
 - 音量链路修复
 - 源端音量为 0 时的显式静音行为
 - 输出设备选择
 - Win11 风格托盘设置和界面刷新
+- `v1.2.1+` 继续承接稳定性、兼容性和回归修复，不再维护独立 `v1.1.x` 分支。
 
-### v1.3 自动化与分发
+### 下一阶段：v1.3.0
 - `connect`、`disconnect`、`show` 命令行参数
 - 适配任务计划程序的调用方式
 - 安装器打包
@@ -85,6 +87,7 @@ This fork is the active maintenance branch for AudioPlaybackConnector.
 - Prioritize stability, build health, and release reliability first.
 - Improve volume, output routing, and Windows 11 experience second.
 - Add automation and distribution polish after the core experience is reliable.
+- The current target release is `v1.2.0`, and follow-up stability work will continue in `v1.2.x`.
 
 ## Current Fork Deltas
 - Reconnect handling has been hardened to reduce no-audio reconnect failures and stale picker state.
@@ -129,20 +132,21 @@ This fork is the active maintenance branch for AudioPlaybackConnector.
 - `#38` call support
 
 ## Version Roadmap
-### v1.1.x Stability
+### Historical stage: v1.1.0
 - CI, restore, and release pipeline health
 - reconnect fixes and stale-state cleanup
 - Windows 11 compatibility fixes
 - no-audio diagnostics and issue triage
 - ARM build strategy for legacy SDK selection
 
-### v1.2 Experience
+### Current release line: v1.2.x
 - volume pipeline fixes
 - explicit mute behavior at zero source volume
 - output device selection
 - Windows 11-style tray settings and visual refresh
+- `v1.2.1+` continues to carry stability, compatibility, and regression fixes; there is no separate `v1.1.x` maintenance line anymore.
 
-### v1.3 Automation and Distribution
+### Next stage: v1.3.0
 - `connect`, `disconnect`, and `show` command-line options
 - task scheduler friendly invocation
 - installer packaging
