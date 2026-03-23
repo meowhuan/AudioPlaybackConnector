@@ -39,18 +39,35 @@ function Get-MSBuildPath {
 }
 
 function Get-WindowsSdkVersion {
-    $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\Include"
-    if (-not (Test-Path $sdkRoot)) {
+    param(
+        [string]$TargetPlatform
+    )
+
+    $includeRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\Include"
+    $libRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\Lib"
+    if (-not (Test-Path $includeRoot)) {
         throw "Windows 10 SDK not found."
     }
 
-    $sdkVersion = Get-ChildItem $sdkRoot -Directory |
+    $sdkVersions = Get-ChildItem $includeRoot -Directory |
         Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+        Select-Object -ExpandProperty Name
+
+    if ($TargetPlatform -eq "ARM") {
+        $sdkVersions = $sdkVersions | Where-Object {
+            Test-Path (Join-Path $libRoot "$_\um\arm\gdi32.lib")
+        }
+    }
+
+    $sdkVersion = $sdkVersions |
         Sort-Object {
-            [version]$_.Name
+            [version]$_
         } -Descending |
-        Select-Object -First 1 -ExpandProperty Name
+        Select-Object -First 1
     if (-not $sdkVersion) {
+        if ($TargetPlatform -eq "ARM") {
+            throw "No Windows 10 SDK with 32-bit ARM desktop libraries found."
+        }
         throw "No Windows 10 SDK version directories found."
     }
     return $sdkVersion
@@ -127,7 +144,7 @@ function Invoke-TranslationGeneration {
 $nuget = Get-NuGetPath
 $msbuild = Get-MSBuildPath
 $windowsSdkRoot = Get-WindowsSdkRoot
-$windowsSdkVersion = Get-WindowsSdkVersion
+$windowsSdkVersion = Get-WindowsSdkVersion -TargetPlatform $Platform
 
 $env:TargetPlatformIdentifier = "Windows"
 $env:TargetPlatformVersion = $windowsSdkVersion
