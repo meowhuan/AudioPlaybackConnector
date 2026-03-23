@@ -15,3 +15,9 @@ So I write this app, provide a simple, modern and open-source alternative.
 * Add a bluetooth device in system bluetooth settings. You can right click AudioPlaybackConnector icon in notification area and select "Bluetooth Settings".
 * Click AudioPlaybackConnector icon and select the device you want to connect.
 * Enjoy!
+
+# Maintainer Build
+* Install Visual Studio 2022 or Build Tools 2022 with MSBuild and the Windows 10 SDK `10.0.22621.0`.
+* Install Python 3.
+* Run `./scripts/build.ps1 -Configuration Release -Platform x64` from PowerShell.
+* The script restores NuGet packages, installs translation dependencies, generates translation resources, and builds the solution.

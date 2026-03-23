@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import sys
-from translate.storage import po
+import polib
 
 FNV1_32_INIT = 0x811c9dc5
 FNV_32_PRIME = 0x01000193
@@ -12,17 +12,18 @@ def fnv1a_32(data, hval=FNV1_32_INIT):
     return hval
 
 def po2ymo(infile, outfile, includefuzzy=False, encoding='utf-16le'):
-    inputstore = po.pofile(infile)
+    inputstore = polib.pofile(infile.name)
 
     units = {}
-    for unit in inputstore.units:
-        if unit.istranslated() or (unit.isfuzzy() and includefuzzy and unit.target):
-            source = unit.source
-            context = unit.getcontext()
+    for unit in inputstore:
+        is_fuzzy = "fuzzy" in unit.flags
+        if unit.translated() or (is_fuzzy and includefuzzy and unit.msgstr):
+            source = unit.msgid
+            context = unit.msgctxt
             if context:
                 source = context + '\004' + source
             hash = fnv1a_32(source.encode(encoding))
-            units[hash] = unit.target.encode(encoding) + bytes(2)
+            units[hash] = unit.msgstr.encode(encoding) + bytes(2)
 
     byteorder='little'
     outfile.write(len(units).to_bytes(2, byteorder)) # len

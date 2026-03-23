@@ -67,3 +67,39 @@ msgstr ""
 #: AudioPlaybackConnector.cpp:362
 msgid "Connected"
 msgstr ""
+
+msgid "Error"
+msgstr ""
+
+msgid "Could not create mutex. Application will exit."
+msgstr ""
+
+msgid "Information"
+msgstr ""
+
+msgid "Another instance is running, but its window could not be found."
+msgstr ""
+
+msgid "Application has started and is running in the notification area."
+msgstr ""
+
+msgid "Launch at startup"
+msgstr ""
+
+msgid "Playback volume"
+msgstr ""
+
+msgid "Reduce other apps while connected"
+msgstr ""
+
+msgid "Other apps volume"
+msgstr ""
+
+msgid "Show startup notification"
+msgstr ""
+
+msgid "Settings"
+msgstr ""
+
+msgid "Open requested"
+msgstr ""

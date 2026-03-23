@@ -10,20 +10,28 @@
 #include "targetver.h"
 
 // Windows Header Files
-#define WIN32_LEAN_AND_MEAN             // Exclude rarely-used stuff from Windows headers
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
 #include <commctrl.h>
 #include <shellapi.h>
 #include <shobjidl_core.h>
+#include <mmdeviceapi.h>
+#include <audiopolicy.h>
 #include <d2d1_3.h>
 #include <shlwapi.h>
 
 // C++ RunTime Header Files
-#include <cstdlib>
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <filesystem>
+#include <vector>
 
 // wil
 #ifndef _DEBUG
@@ -35,16 +43,17 @@
 #include <wil/cppwinrt.h>
 
 // C++/WinRT
-// Fixes warning C4002: too many arguments for function-like macro invocation 'GetCurrentTime'
 #undef GetCurrentTime
 
 #include <winrt/base.h>
 #include <winrt/Windows.Data.Json.h>
+#include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.Devices.Enumeration.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Foundation.Metadata.h>
 #include <winrt/Windows.Media.Audio.h>
 #include <winrt/Windows.System.h>
+#include <winrt/Windows.UI.Notifications.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Xaml.Hosting.h>

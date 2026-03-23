@@ -69,3 +69,39 @@ msgstr "未知错误"
 #: AudioPlaybackConnector.cpp:362
 msgid "Connected"
 msgstr "已连接"
+
+msgid "Error"
+msgstr "错误"
+
+msgid "Could not create mutex. Application will exit."
+msgstr "无法创建互斥体，程序将退出。"
+
+msgid "Information"
+msgstr "提示"
+
+msgid "Another instance is running, but its window could not be found."
+msgstr "另一个实例正在运行，但未能找到它的窗口。"
+
+msgid "Application has started and is running in the notification area."
+msgstr "应用已启动，正在通知区域中运行。"
+
+msgid "Launch at startup"
+msgstr "开机启动"
+
+msgid "Playback volume"
+msgstr "播放音量"
+
+msgid "Reduce other apps while connected"
+msgstr "连接时降低其他应用音量"
+
+msgid "Other apps volume"
+msgstr "其他应用音量"
+
+msgid "Show startup notification"
+msgstr "显示启动通知"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Open requested"
+msgstr "已请求打开"
