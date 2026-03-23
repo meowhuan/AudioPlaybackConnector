@@ -231,5 +231,5 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
           files: ${{ steps.release_files.outputs.files }}
