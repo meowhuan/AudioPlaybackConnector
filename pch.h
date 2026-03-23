@@ -17,6 +17,8 @@
 #include <shellapi.h>
 #include <shobjidl_core.h>
 #include <mmdeviceapi.h>
+#include <functiondiscoverykeys_devpkey.h>
+#include <propsys.h>
 #include <audiopolicy.h>
 #include <d2d1_3.h>
 #include <shlwapi.h>
@@ -27,6 +29,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>

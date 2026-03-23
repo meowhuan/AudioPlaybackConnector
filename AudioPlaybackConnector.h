@@ -28,6 +28,13 @@ struct DuckedSessionInfo
 	BOOL originalMute = FALSE;
 };
 
+struct OutputDeviceInfo
+{
+	std::wstring id;
+	std::wstring name;
+	bool isDefault = false;
+};
+
 HANDLE g_hMutex = nullptr;
 HINSTANCE g_hInst;
 HWND g_hWnd;
@@ -42,6 +49,7 @@ std::unordered_map<std::wstring, std::pair<DeviceInformation, AudioPlaybackConne
 std::unordered_map<std::wstring, Clock::time_point> g_lastCloseTime;
 std::unordered_map<std::wstring, DuckedSessionInfo> g_duckedSessions;
 CheckBox g_autoStartCheckBox = nullptr;
+ComboBox g_outputDeviceComboBox = nullptr;
 Slider g_volumeSlider = nullptr;
 TextBlock g_volumeValueText = nullptr;
 CheckBox g_duckOtherAppsCheckBox = nullptr;
@@ -66,7 +74,14 @@ bool g_duckOtherApps = true;
 bool g_showStartupToast = false;
 double g_volume = 1.0;
 double g_duckedAppsVolume = 0.35;
+bool g_isRefreshingOutputDeviceComboBox = false;
 std::vector<std::wstring> g_lastDevices;
+std::vector<OutputDeviceInfo> g_outputDevices;
+std::wstring g_outputDeviceId;
+std::wstring g_activeOutputDeviceId;
+uint64_t g_outputRoutingGeneration = 0;
+uint64_t g_outputRoutingScheduledToken = 0;
+uint32_t g_outputRoutingAttemptCount = 0;
 
 #include "Util.hpp"
 #include "I18n.hpp"

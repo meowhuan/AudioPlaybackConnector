@@ -66,6 +66,7 @@ void DefaultSettings()
 	g_showStartupToast = false;
 	g_volume = 1.0;
 	g_duckedAppsVolume = 0.35;
+	g_outputDeviceId.clear();
 	g_lastDevices.clear();
 }
 
@@ -109,6 +110,13 @@ void LoadSettings()
 		if (jsonObj.HasKey(L"showStartupToast"))
 			g_showStartupToast = jsonObj.Lookup(L"showStartupToast").GetBoolean();
 
+		if (jsonObj.HasKey(L"outputDeviceId"))
+		{
+			auto outputDeviceId = jsonObj.Lookup(L"outputDeviceId");
+			if (outputDeviceId.ValueType() == JsonValueType::String)
+				g_outputDeviceId = std::wstring(outputDeviceId.GetString());
+		}
+
 		if (jsonObj.HasKey(L"lastDevices"))
 		{
 			auto lastDevices = jsonObj.Lookup(L"lastDevices").GetArray();
@@ -136,6 +144,7 @@ void SaveSettings()
 		jsonObj.Insert(L"duckOtherApps", JsonValue::CreateBooleanValue(g_duckOtherApps));
 		jsonObj.Insert(L"duckedAppsVolume", JsonValue::CreateNumberValue(g_duckedAppsVolume));
 		jsonObj.Insert(L"showStartupToast", JsonValue::CreateBooleanValue(g_showStartupToast));
+		jsonObj.Insert(L"outputDeviceId", JsonValue::CreateStringValue(g_outputDeviceId));
 
 		JsonArray lastDevices;
 		for (const auto& i : g_audioPlaybackConnections)

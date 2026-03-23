@@ -12,6 +12,7 @@
 - 已增强重连处理，降低重连后无声和设备列表状态残留问题。
 - 已加入单实例启动行为。
 - 已加入可选启动通知、开机自启、播放音量和连接时自动压低其他应用音量。
+- 已加入输出设备选择配置与设备枚举，并切换为延迟安全尝试模式，当前继续收敛与首次连接音频建链的兼容性。
 - 已更新构建与发布流程，适配当前 Visual Studio 2022 和 GitHub Actions。
 
 ## 标签体系
@@ -33,9 +34,10 @@
 - `#42`、`#40`、`#19` 中与重连和状态残留相关的症状
 - `#50` 音量为 0 时仍有残余声
 - `#49` 音量忽大忽小
+- `#35`、`#25`、`#40` Win11 与连接稳定性问题
 
 ### 高优先级计划
-- `#28`、`#31`、`#43` 输出设备选择
+- `#28`、`#31`、`#43` 输出设备选择兼容性收敛与延迟安全路由
 - `#35`、`#25`、`#40` Win11 与连接稳定性问题
 
 ### 中优先级计划
@@ -93,6 +95,7 @@ This fork is the active maintenance branch for AudioPlaybackConnector.
 - Reconnect handling has been hardened to reduce no-audio reconnect failures and stale picker state.
 - Single-instance startup behavior has been added.
 - Optional startup notification, auto-start, playback volume, and ducking of other apps have been added.
+- Output device selection settings and device enumeration have been added, and routing now uses a delayed safe-attempt model while first-connect compatibility is still being stabilized.
 - The build and release workflow has been updated for current Visual Studio 2022 and GitHub Actions.
 
 ## Label Taxonomy
@@ -112,11 +115,11 @@ This fork is the active maintenance branch for AudioPlaybackConnector.
 - `#17` Don't allow multiple instances
 - the single-instance part of `#37`
 - reconnect and stale-state symptoms from `#42`, `#40`, and `#19`
-
-### Planned high priority
 - `#50` residual audio when source volume is zero
 - `#49` unstable volume
-- `#28`, `#31`, `#43` output device selection
+
+### Planned high priority
+- `#28`, `#31`, `#43` output device selection compatibility stabilization and delayed safe routing
 - `#35`, `#25`, `#40` Windows 11 and connection reliability issues
 
 ### Planned medium priority

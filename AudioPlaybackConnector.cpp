@@ -5,8 +5,8 @@ LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 void SetupFlyout();
 void SetupSettingsFlyout();
 void SetupMenu();
-winrt::fire_and_forget ConnectDevice(DevicePicker, std::wstring_view);
-winrt::fire_and_forget ConnectDevice(DevicePicker, DeviceInformation);
+winrt::fire_and_forget ConnectDevice(DevicePicker, std::wstring_view, std::wstring_view);
+winrt::fire_and_forget ConnectDevice(DevicePicker, DeviceInformation, std::wstring_view);
 winrt::fire_and_forget DisconnectDevice(DevicePicker, DeviceInformation);
 winrt::fire_and_forget RefreshDeviceStatuses(DevicePicker);
 void SetupDevicePicker();
@@ -16,15 +16,44 @@ void ShowTrayFlyout(Flyout);
 void ShowDevicePickerFromTray();
 void UpdateVolumeText();
 void UpdateDuckedAppsVolumeText();
+void RefreshOutputDeviceOptions();
+void UpdateOutputDeviceSelection();
+void ScheduleOutputDeviceRoutingAttempt(std::wstring_view, std::wstring_view, std::chrono::milliseconds, bool);
 void ApplyOwnSessionVolume(std::wstring_view);
 void ApplyDuckingPolicy();
 void RestoreDuckedSessions();
+void ApplyOutputDeviceRouting(std::wstring_view);
 void ShowInitialToastNotification();
 
 namespace
 {
 	constexpr auto RECONNECT_COOLDOWN = std::chrono::milliseconds(1500);
 	constexpr auto DISCONNECT_TIMEOUT = std::chrono::milliseconds(2000);
+	constexpr auto OUTPUT_ROUTING_DELAY = std::chrono::milliseconds(1500);
+	constexpr auto OUTPUT_ROUTING_SETTINGS_DELAY = std::chrono::milliseconds(600);
+	constexpr auto OUTPUT_ROUTING_POST_APPLY_DELAY = std::chrono::milliseconds(250);
+	constexpr uint32_t OUTPUT_ROUTING_MAX_ATTEMPTS = 1;
+	constexpr wchar_t DEFAULT_OUTPUT_DEVICE_ITEM_ID[] = L"";
+	constexpr wchar_t DEFAULT_OUTPUT_DEVICE_ITEM_NAME[] = L"Default output device";
+	constexpr wchar_t UNAVAILABLE_OUTPUT_DEVICE_ITEM_PREFIX[] = L"[Unavailable] ";
+
+	struct DECLSPEC_UUID("870af99c-171d-4f9e-9083-f5377e6a3555") IPolicyConfig2 : ::IUnknown
+	{
+		virtual HRESULT STDMETHODCALLTYPE GetMixFormat(PCWSTR, WAVEFORMATEX**) = 0;
+		virtual HRESULT STDMETHODCALLTYPE GetDeviceFormat(PCWSTR, INT, WAVEFORMATEX**) = 0;
+		virtual HRESULT STDMETHODCALLTYPE SetDeviceFormat(PCWSTR, WAVEFORMATEX*, WAVEFORMATEX*) = 0;
+		virtual HRESULT STDMETHODCALLTYPE GetProcessingPeriod(PCWSTR, INT, PINT64, PINT64) = 0;
+		virtual HRESULT STDMETHODCALLTYPE SetProcessingPeriod(PCWSTR, INT, INT64) = 0;
+		virtual HRESULT STDMETHODCALLTYPE GetShareMode(PCWSTR, void*) = 0;
+		virtual HRESULT STDMETHODCALLTYPE SetShareMode(PCWSTR, void*) = 0;
+		virtual HRESULT STDMETHODCALLTYPE GetPropertyValue(PCWSTR, const PROPERTYKEY&, PROPVARIANT*) = 0;
+		virtual HRESULT STDMETHODCALLTYPE SetPropertyValue(PCWSTR, const PROPERTYKEY&, PROPVARIANT*) = 0;
+		virtual HRESULT STDMETHODCALLTYPE SetDefaultEndpoint(PCWSTR, ERole) = 0;
+		virtual HRESULT STDMETHODCALLTYPE SetEndpointVisibility(PCWSTR, BOOL) = 0;
+		virtual HRESULT STDMETHODCALLTYPE SetPerAppDefaultEndpoint(PCWSTR, DWORD, ERole) = 0;
+	};
+
+	struct DECLSPEC_UUID("870af99c-171d-4f9e-af0d-e63df40c2bc9") CPolicyConfigClient;
 
 	bool IsCurrentConnection(std::wstring_view deviceId, AudioPlaybackConnection const& connection)
 	{
@@ -40,6 +69,62 @@ namespace
 	bool ShouldDuckOtherApps()
 	{
 		return g_duckOtherApps && !g_audioPlaybackConnections.empty();
+	}
+
+	void LogRoutingDiagnostics(std::wstring_view reason, std::wstring_view targetDeviceId, bool fellBackToDefault)
+	{
+		wchar_t buffer[512];
+		swprintf_s(
+			buffer,
+			L"[AudioPlaybackConnector] route reason=%.*s target=%.*s active=%.*s fallback=%d preferred=%.*s\r\n",
+			static_cast<int>(reason.size()),
+			reason.data(),
+			static_cast<int>(targetDeviceId.size()),
+			targetDeviceId.data(),
+			static_cast<int>(g_activeOutputDeviceId.size()),
+			g_activeOutputDeviceId.data(),
+			fellBackToDefault ? 1 : 0,
+			static_cast<int>(g_outputDeviceId.size()),
+			g_outputDeviceId.data()
+		);
+		OutputDebugStringW(buffer);
+	}
+
+	void LogOutputRoutingAttempt(std::wstring_view reason, std::wstring_view source, uint32_t attempt, uint64_t generation, bool skipped)
+	{
+		wchar_t buffer[512];
+		swprintf_s(
+			buffer,
+			L"[AudioPlaybackConnector] route-attempt reason=%.*s source=%.*s attempt=%lu generation=%llu connections=%zu skipped=%d\r\n",
+			static_cast<int>(reason.size()),
+			reason.data(),
+			static_cast<int>(source.size()),
+			source.data(),
+			static_cast<unsigned long>(attempt),
+			static_cast<unsigned long long>(generation),
+			g_audioPlaybackConnections.size(),
+			skipped ? 1 : 0
+		);
+		OutputDebugStringW(buffer);
+	}
+
+	void LogConnectionDiagnostics(std::wstring_view phase, std::wstring_view source, std::wstring_view deviceId, AudioPlaybackConnectionState state)
+	{
+		wchar_t buffer[512];
+		swprintf_s(
+			buffer,
+			L"[AudioPlaybackConnector] connection phase=%.*s source=%.*s device=%.*s state=%d reconnect=%d connections=%zu\r\n",
+			static_cast<int>(phase.size()),
+			phase.data(),
+			static_cast<int>(source.size()),
+			source.data(),
+			static_cast<int>(deviceId.size()),
+			deviceId.data(),
+			static_cast<int>(state),
+			g_reconnect ? 1 : 0,
+			g_audioPlaybackConnections.size()
+		);
+		OutputDebugStringW(buffer);
 	}
 
 	std::wstring GetSessionKey(IAudioSessionControl2* sessionControl2)
@@ -75,6 +160,186 @@ namespace
 			g_duckOtherApps ? 1 : 0
 		);
 		OutputDebugStringW(buffer);
+	}
+
+	std::wstring GetDeviceId(IMMDevice* device)
+	{
+		wil::unique_cotaskmem_string deviceId;
+		THROW_IF_FAILED(device->GetId(wil::out_param(deviceId)));
+		return std::wstring(deviceId.get());
+	}
+
+	std::wstring GetDeviceFriendlyName(IMMDevice* device)
+	{
+		winrt::com_ptr<IPropertyStore> propertyStore;
+		THROW_IF_FAILED(device->OpenPropertyStore(STGM_READ, propertyStore.put()));
+
+		PROPVARIANT value{};
+		THROW_IF_FAILED(propertyStore->GetValue(PKEY_Device_FriendlyName, &value));
+		auto clearValue = wil::scope_exit([&] { PropVariantClear(&value); });
+
+		if (value.vt == VT_LPWSTR && value.pwszVal)
+		{
+			return value.pwszVal;
+		}
+
+		return _(L"Unknown device");
+	}
+
+	winrt::com_ptr<IMMDeviceEnumerator> CreateDeviceEnumerator()
+	{
+		winrt::com_ptr<IMMDeviceEnumerator> deviceEnumerator;
+		THROW_IF_FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), deviceEnumerator.put_void()));
+		return deviceEnumerator;
+	}
+
+	winrt::com_ptr<IMMDevice> GetDefaultRenderDevice(IMMDeviceEnumerator* deviceEnumerator)
+	{
+		winrt::com_ptr<IMMDevice> device;
+		THROW_IF_FAILED(deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, device.put()));
+		return device;
+	}
+
+	std::vector<OutputDeviceInfo> EnumerateOutputDevices(std::wstring* defaultDeviceId = nullptr)
+	{
+		auto deviceEnumerator = CreateDeviceEnumerator();
+		auto defaultDevice = GetDefaultRenderDevice(deviceEnumerator.get());
+		auto resolvedDefaultDeviceId = GetDeviceId(defaultDevice.get());
+
+		if (defaultDeviceId)
+		{
+			*defaultDeviceId = resolvedDefaultDeviceId;
+		}
+
+		winrt::com_ptr<IMMDeviceCollection> collection;
+		THROW_IF_FAILED(deviceEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, collection.put()));
+
+		UINT count = 0;
+		THROW_IF_FAILED(collection->GetCount(&count));
+
+		std::vector<OutputDeviceInfo> devices;
+		devices.reserve(count);
+		for (UINT i = 0; i < count; ++i)
+		{
+			winrt::com_ptr<IMMDevice> device;
+			THROW_IF_FAILED(collection->Item(i, device.put()));
+
+			auto deviceId = GetDeviceId(device.get());
+			OutputDeviceInfo info;
+			info.id = std::move(deviceId);
+			info.name = GetDeviceFriendlyName(device.get());
+			info.isDefault = info.id == resolvedDefaultDeviceId;
+			devices.push_back(std::move(info));
+		}
+
+		std::sort(devices.begin(), devices.end(), [](const auto& left, const auto& right) {
+			if (left.isDefault != right.isDefault)
+			{
+				return left.isDefault;
+			}
+			return CompareStringOrdinal(left.name.c_str(), -1, right.name.c_str(), -1, TRUE) == CSTR_LESS_THAN;
+		});
+
+		return devices;
+	}
+
+	std::optional<OutputDeviceInfo> ResolvePreferredOutputDevice(bool* fellBackToDefault = nullptr)
+	{
+		bool usedFallback = false;
+		std::wstring defaultDeviceId;
+		auto devices = EnumerateOutputDevices(&defaultDeviceId);
+
+		if (g_outputDeviceId.empty())
+		{
+			auto it = std::find_if(devices.begin(), devices.end(), [&](const auto& device) {
+				return device.id == defaultDeviceId;
+			});
+			if (it != devices.end())
+			{
+				if (fellBackToDefault)
+				{
+					*fellBackToDefault = false;
+				}
+				return *it;
+			}
+		}
+		else
+		{
+			auto it = std::find_if(devices.begin(), devices.end(), [&](const auto& device) {
+				return device.id == g_outputDeviceId;
+			});
+			if (it != devices.end())
+			{
+				if (fellBackToDefault)
+				{
+					*fellBackToDefault = false;
+				}
+				return *it;
+			}
+			usedFallback = true;
+		}
+
+		auto defaultIt = std::find_if(devices.begin(), devices.end(), [](const auto& device) {
+			return device.isDefault;
+		});
+		if (fellBackToDefault)
+		{
+			*fellBackToDefault = usedFallback;
+		}
+		if (defaultIt != devices.end())
+		{
+			return *defaultIt;
+		}
+		return std::nullopt;
+	}
+
+	winrt::com_ptr<IMMDevice> GetActiveRenderDevice()
+	{
+		bool fellBackToDefault = false;
+		auto resolvedDevice = ResolvePreferredOutputDevice(&fellBackToDefault);
+		THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_NOT_FOUND), !resolvedDevice.has_value());
+
+		auto deviceEnumerator = CreateDeviceEnumerator();
+		winrt::com_ptr<IMMDevice> device;
+		THROW_IF_FAILED(deviceEnumerator->GetDevice(resolvedDevice->id.c_str(), device.put()));
+		return device;
+	}
+
+	winrt::com_ptr<IAudioSessionManager2> CreateTargetSessionManager()
+	{
+		auto device = GetActiveRenderDevice();
+		winrt::com_ptr<IAudioSessionManager2> sessionManager;
+		THROW_IF_FAILED(device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, sessionManager.put_void()));
+		return sessionManager;
+	}
+
+	winrt::fire_and_forget TryApplyDelayedOutputRouting(std::wstring reason, std::wstring source, std::chrono::milliseconds delay, uint64_t generation, uint64_t scheduledToken, uint32_t attempt)
+	{
+		co_await winrt::resume_after(delay);
+
+		if (scheduledToken != g_outputRoutingScheduledToken || generation != g_outputRoutingGeneration)
+		{
+			LogOutputRoutingAttempt(reason, source, attempt, generation, true);
+			co_return;
+		}
+
+		if (g_audioPlaybackConnections.empty() || attempt > OUTPUT_ROUTING_MAX_ATTEMPTS)
+		{
+			LogOutputRoutingAttempt(reason, source, attempt, generation, true);
+			co_return;
+		}
+
+		LogOutputRoutingAttempt(reason, source, attempt, generation, false);
+		ApplyOutputDeviceRouting(reason);
+		co_await winrt::resume_after(OUTPUT_ROUTING_POST_APPLY_DELAY);
+
+		if (scheduledToken != g_outputRoutingScheduledToken || generation != g_outputRoutingGeneration || g_audioPlaybackConnections.empty())
+		{
+			co_return;
+		}
+
+		ApplyOwnSessionVolume(L"delayed-route");
+		ApplyDuckingPolicy();
 	}
 }
 
@@ -275,7 +540,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			for (const auto& deviceId : g_lastDevices)
 			{
-				ConnectDevice(g_devicePicker, deviceId);
+				ConnectDevice(g_devicePicker, deviceId, L"auto-reconnect");
 			}
 			g_lastDevices.clear();
 		}
@@ -361,21 +626,147 @@ void UpdateDuckedAppsVolumeText()
 	}
 }
 
+void RefreshOutputDeviceOptions()
+{
+	try
+	{
+		g_outputDevices = EnumerateOutputDevices();
+
+		if (!g_outputDeviceComboBox)
+			return;
+
+		g_isRefreshingOutputDeviceComboBox = true;
+		auto resetRefreshing = wil::scope_exit([&] { g_isRefreshingOutputDeviceComboBox = false; });
+
+		auto items = g_outputDeviceComboBox.Items();
+		items.Clear();
+
+		ComboBoxItem defaultItem;
+		defaultItem.Content(winrt::box_value(_(DEFAULT_OUTPUT_DEVICE_ITEM_NAME)));
+		items.Append(defaultItem);
+
+		bool selected = g_outputDeviceId.empty();
+		for (const auto& device : g_outputDevices)
+		{
+			ComboBoxItem item;
+			item.Content(winrt::box_value(device.name));
+			items.Append(item);
+
+			if (device.id == g_outputDeviceId)
+			{
+				g_outputDeviceComboBox.SelectedItem(item);
+				selected = true;
+			}
+		}
+
+		if (!selected && !g_outputDeviceId.empty())
+		{
+			ComboBoxItem unavailableItem;
+			unavailableItem.Content(winrt::box_value(std::wstring(_(UNAVAILABLE_OUTPUT_DEVICE_ITEM_PREFIX)) + g_outputDeviceId));
+			items.Append(unavailableItem);
+			g_outputDeviceComboBox.SelectedItem(unavailableItem);
+			selected = true;
+		}
+
+		if (!selected)
+		{
+			g_outputDeviceComboBox.SelectedIndex(0);
+		}
+	}
+	CATCH_LOG();
+}
+
+void UpdateOutputDeviceSelection()
+{
+	if (!g_outputDeviceComboBox)
+		return;
+
+	if (g_outputDeviceId.empty())
+	{
+		if (g_outputDeviceComboBox.Items().Size() > 0)
+		{
+			g_outputDeviceComboBox.SelectedIndex(0);
+		}
+		return;
+	}
+
+	for (uint32_t i = 0; i < g_outputDeviceComboBox.Items().Size(); ++i)
+	{
+		if (i > 0 && (i - 1) < g_outputDevices.size() && g_outputDevices[i - 1].id == g_outputDeviceId)
+		{
+			g_outputDeviceComboBox.SelectedIndex(static_cast<int32_t>(i));
+			return;
+		}
+	}
+
+	if (g_outputDeviceComboBox.Items().Size() > 0)
+	{
+		g_outputDeviceComboBox.SelectedIndex(0);
+	}
+}
+
+void ScheduleOutputDeviceRoutingAttempt(std::wstring_view reason, std::wstring_view source, std::chrono::milliseconds delay, bool resetAttemptBudget)
+{
+	if (resetAttemptBudget)
+	{
+		g_outputRoutingAttemptCount = 0;
+		++g_outputRoutingGeneration;
+	}
+
+	if (g_audioPlaybackConnections.empty())
+	{
+		LogOutputRoutingAttempt(reason, source, 0, g_outputRoutingGeneration, true);
+		return;
+	}
+
+	if (g_outputRoutingAttemptCount >= OUTPUT_ROUTING_MAX_ATTEMPTS)
+	{
+		LogOutputRoutingAttempt(reason, source, g_outputRoutingAttemptCount, g_outputRoutingGeneration, true);
+		return;
+	}
+
+	const auto attempt = ++g_outputRoutingAttemptCount;
+	const auto generation = g_outputRoutingGeneration;
+	const auto token = ++g_outputRoutingScheduledToken;
+	TryApplyDelayedOutputRouting(std::wstring(reason), std::wstring(source), delay, generation, token, attempt);
+}
+
+void ApplyOutputDeviceRouting(std::wstring_view reason)
+{
+	try
+	{
+		bool fellBackToDefault = false;
+		auto resolvedDevice = ResolvePreferredOutputDevice(&fellBackToDefault);
+		if (!resolvedDevice.has_value())
+		{
+			g_activeOutputDeviceId.clear();
+			LogRoutingDiagnostics(reason, {}, true);
+			return;
+		}
+
+		winrt::com_ptr<IPolicyConfig2> policyConfig;
+		THROW_IF_FAILED(CoCreateInstance(__uuidof(CPolicyConfigClient), nullptr, CLSCTX_ALL, __uuidof(IPolicyConfig2), policyConfig.put_void()));
+
+		const auto processId = GetCurrentProcessId();
+		const auto targetDeviceId = resolvedDevice->id;
+		for (const auto role : { eConsole, eMultimedia, eCommunications })
+		{
+			THROW_IF_FAILED(policyConfig->SetPerAppDefaultEndpoint(targetDeviceId.c_str(), processId, role));
+		}
+
+		g_activeOutputDeviceId = targetDeviceId;
+		LogRoutingDiagnostics(reason, g_activeOutputDeviceId, fellBackToDefault);
+	}
+	CATCH_LOG();
+}
+
 void ApplyOwnSessionVolume(std::wstring_view reason)
 {
 	try
 	{
 		LogVolumeDiagnostics(reason);
 
-		winrt::com_ptr<IMMDeviceEnumerator> deviceEnumerator;
-		THROW_IF_FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), deviceEnumerator.put_void()));
-
-		winrt::com_ptr<IMMDevice> defaultDevice;
-		THROW_IF_FAILED(deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, defaultDevice.put()));
-
-		winrt::com_ptr<IAudioSessionManager2> sessionManager;
-		THROW_IF_FAILED(defaultDevice->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, sessionManager.put_void()));
-
+		auto sessionManager = CreateTargetSessionManager();
 		winrt::com_ptr<IAudioSessionEnumerator> sessionEnumerator;
 		THROW_IF_FAILED(sessionManager->GetSessionEnumerator(sessionEnumerator.put()));
 
@@ -432,15 +823,7 @@ void ApplyDuckingPolicy()
 			return;
 		}
 
-		winrt::com_ptr<IMMDeviceEnumerator> deviceEnumerator;
-		THROW_IF_FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), deviceEnumerator.put_void()));
-
-		winrt::com_ptr<IMMDevice> defaultDevice;
-		THROW_IF_FAILED(deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, defaultDevice.put()));
-
-		winrt::com_ptr<IAudioSessionManager2> sessionManager;
-		THROW_IF_FAILED(defaultDevice->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, sessionManager.put_void()));
-
+		auto sessionManager = CreateTargetSessionManager();
 		winrt::com_ptr<IAudioSessionEnumerator> sessionEnumerator;
 		THROW_IF_FAILED(sessionManager->GetSessionEnumerator(sessionEnumerator.put()));
 
@@ -605,6 +988,45 @@ void SetupSettingsFlyout()
 		SaveAutoStartSettingNoThrow();
 	});
 
+	TextBlock outputDeviceLabel;
+	outputDeviceLabel.Text(_(L"Output device"));
+
+	g_outputDeviceComboBox = ComboBox();
+	g_outputDeviceComboBox.Width(320);
+	g_outputDeviceComboBox.SelectionChanged([](const auto& sender, const auto&) {
+		if (g_isRefreshingOutputDeviceComboBox)
+			return;
+
+		auto comboBox = sender.try_as<ComboBox>();
+		if (!comboBox)
+			return;
+
+		const auto selectedIndex = comboBox.SelectedIndex();
+		if (selectedIndex < 0)
+			return;
+
+		if (selectedIndex == 0)
+		{
+			g_outputDeviceId.clear();
+		}
+		else
+		{
+			const auto deviceIndex = static_cast<size_t>(selectedIndex - 1);
+			if (deviceIndex >= g_outputDevices.size())
+				return;
+			g_outputDeviceId = g_outputDevices[deviceIndex].id;
+		}
+		if (g_audioPlaybackConnections.empty())
+		{
+			LogRoutingDiagnostics(L"settings-output-device-pending", g_outputDeviceId, false);
+			return;
+		}
+
+		ScheduleOutputDeviceRoutingAttempt(L"settings-output-device", L"settings-change", OUTPUT_ROUTING_SETTINGS_DELAY, true);
+	});
+	RefreshOutputDeviceOptions();
+	UpdateOutputDeviceSelection();
+
 	TextBlock volumeLabel;
 	volumeLabel.Text(_(L"Playback volume"));
 
@@ -666,6 +1088,8 @@ void SetupSettingsFlyout()
 	StackPanel rootPanel;
 	rootPanel.Spacing(12);
 	rootPanel.Children().Append(g_autoStartCheckBox);
+	rootPanel.Children().Append(outputDeviceLabel);
+	rootPanel.Children().Append(g_outputDeviceComboBox);
 	rootPanel.Children().Append(volumeLabel);
 	rootPanel.Children().Append(g_volumeSlider);
 	rootPanel.Children().Append(g_volumeValueText);
@@ -678,6 +1102,10 @@ void SetupSettingsFlyout()
 	Flyout flyout;
 	flyout.ShouldConstrainToRootBounds(false);
 	flyout.Content(rootPanel);
+	flyout.Opening([](const auto&, const auto&) {
+		RefreshOutputDeviceOptions();
+		UpdateOutputDeviceSelection();
+	});
 
 	g_settingsFlyout = flyout;
 }
@@ -741,13 +1169,14 @@ void SetupMenu()
 	g_xamlMenu = menu;
 }
 
-winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation device)
+winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation device, std::wstring_view connectionSource)
 {
 	picker.SetDisplayStatus(device, _(L"Connecting"), DevicePickerDisplayStatusOptions::ShowProgress | DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 
 	bool success = false;
 	std::wstring errorMessage;
 	const auto deviceId = std::wstring(device.Id());
+	const auto source = std::wstring(connectionSource);
 	AudioPlaybackConnection connection = nullptr;
 
 	try
@@ -775,8 +1204,9 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 
 			g_audioPlaybackConnections.insert_or_assign(deviceId, std::pair(device, connection));
 
-			connection.StateChanged([deviceId](const auto& sender, const auto&) {
+			connection.StateChanged([deviceId, source](const auto& sender, const auto&) {
 				const auto state = sender.State();
+				LogConnectionDiagnostics(L"state-changed", source, deviceId, state);
 				if (state == AudioPlaybackConnectionState::Opened)
 				{
 					if (IsCurrentConnection(deviceId, sender))
@@ -786,6 +1216,10 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 						{
 							g_devicePicker.SetDisplayStatus(it->second.first, _(L"Connected"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
 						}
+					}
+					if (!g_outputDeviceId.empty())
+					{
+						ScheduleOutputDeviceRoutingAttempt(L"state-opened-delayed-route", source, OUTPUT_ROUTING_DELAY, false);
 					}
 					ApplyOwnSessionVolume(L"state-opened");
 					ApplyDuckingPolicy();
@@ -805,6 +1239,10 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 					sender.Close();
 					if (g_audioPlaybackConnections.empty())
 					{
+						++g_outputRoutingGeneration;
+						g_outputRoutingAttemptCount = 0;
+						++g_outputRoutingScheduledToken;
+						g_activeOutputDeviceId.clear();
 						ApplyOwnSessionVolume(L"state-closed-empty");
 						RestoreDuckedSessions();
 					}
@@ -856,6 +1294,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 
 	if (success)
 	{
+		LogConnectionDiagnostics(L"open-success", source, deviceId, connection ? connection.State() : AudioPlaybackConnectionState::Closed);
 		if (connection && connection.State() == AudioPlaybackConnectionState::Opened)
 		{
 			picker.SetDisplayStatus(device, _(L"Connected"), DevicePickerDisplayStatusOptions::ShowDisconnectButton);
@@ -869,6 +1308,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 	}
 	else
 	{
+		LogConnectionDiagnostics(L"open-failure", source, deviceId, connection ? connection.State() : AudioPlaybackConnectionState::Closed);
 		if (connection)
 		{
 			if (IsCurrentConnection(deviceId, connection))
@@ -888,6 +1328,10 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 		}
 		if (g_audioPlaybackConnections.empty())
 		{
+			++g_outputRoutingGeneration;
+			g_outputRoutingAttemptCount = 0;
+			++g_outputRoutingScheduledToken;
+			g_activeOutputDeviceId.clear();
 			ApplyOwnSessionVolume(L"connect-failure-empty");
 			RestoreDuckedSessions();
 		}
@@ -905,6 +1349,10 @@ winrt::fire_and_forget DisconnectDevice(DevicePicker picker, DeviceInformation d
 		picker.SetDisplayStatus(device, {}, DevicePickerDisplayStatusOptions::None);
 		if (g_audioPlaybackConnections.empty())
 		{
+			++g_outputRoutingGeneration;
+			g_outputRoutingAttemptCount = 0;
+			++g_outputRoutingScheduledToken;
+			g_activeOutputDeviceId.clear();
 			ApplyOwnSessionVolume(L"disconnect-missing-empty");
 			RestoreDuckedSessions();
 		}
@@ -925,6 +1373,10 @@ winrt::fire_and_forget DisconnectDevice(DevicePicker picker, DeviceInformation d
 
 	if (g_audioPlaybackConnections.empty())
 	{
+		++g_outputRoutingGeneration;
+		g_outputRoutingAttemptCount = 0;
+		++g_outputRoutingScheduledToken;
+		g_activeOutputDeviceId.clear();
 		ApplyOwnSessionVolume(L"disconnect-empty");
 		RestoreDuckedSessions();
 	}
@@ -954,10 +1406,10 @@ winrt::fire_and_forget RefreshDeviceStatuses(DevicePicker picker)
 	}
 }
 
-winrt::fire_and_forget ConnectDevice(DevicePicker picker, std::wstring_view deviceId)
+winrt::fire_and_forget ConnectDevice(DevicePicker picker, std::wstring_view deviceId, std::wstring_view connectionSource)
 {
 	auto device = co_await DeviceInformation::CreateFromIdAsync(deviceId);
-	ConnectDevice(picker, device);
+	ConnectDevice(picker, device, connectionSource);
 }
 
 void SetupDevicePicker()
@@ -970,7 +1422,7 @@ void SetupDevicePicker()
 		SetWindowPos(g_hWnd, nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_HIDEWINDOW);
 	});
 	g_devicePicker.DeviceSelected([](const auto& sender, const auto& args) {
-		ConnectDevice(sender, args.SelectedDevice());
+		ConnectDevice(sender, args.SelectedDevice(), L"manual-picker");
 	});
 	g_devicePicker.DisconnectButtonClicked([](const auto& sender, const auto& args) {
 		DisconnectDevice(sender, args.Device());

@@ -7,16 +7,17 @@ Windows 10 2004+ 蓝牙音频接收 (A2DP Sink) 连接工具。
 所以这个项目提供了一个简单、现代且开源的替代品。
 
 # 预览
-![预览](https://cdn.jsdelivr.net/gh/ysc3839/AudioPlaybackConnector@master/AudioPlaybackConnector.gif)
+![预览](https://cdn.jsdelivr.net/gh/meowhuan/AudioPlaybackConnector@master/AudioPlaybackConnector.gif)
 
 # 使用方法
-* 从 [releases](https://github.com/ysc3839/AudioPlaybackConnector/releases) 下载并运行 AudioPlaybackConnector。
+* 从 [releases](https://github.com/meowhuan/AudioPlaybackConnector/releases) 下载并运行 AudioPlaybackConnector。
 * 在系统蓝牙设置中添加蓝牙设备。你可以右键点击通知区域的 AudioPlaybackConnector 图标，然后选择“蓝牙设置”。
 * 点击 AudioPlaybackConnector 图标，然后选择要连接的设备。
 * 开始使用。
 
 # 维护说明
 * 这个 fork 作为当前的活跃维护分支，优先处理稳定性、音频体验和构建发布问题。
+* 当前 `v1.2.x` 重点包含音量链路修复和输出设备选择；输出设备切换现已采用延迟安全尝试模式，`v1.1.0` 作为历史稳定性阶段保留。
 * 路线图、已知限制和原仓库 issue 映射见 [docs/MAINTENANCE.md](docs/MAINTENANCE.md)。
 * issue 分诊规则和建议补充的信息见 [docs/ISSUE_TRIAGE.md](docs/ISSUE_TRIAGE.md)。
 
@@ -35,16 +36,17 @@ Bluetooth audio playback (A2DP Sink) connector for Windows 10 version 2004 and n
 Microsoft added Bluetooth A2DP Sink support in Windows 10 version 2004, but a third-party app is still required to manage the connection. Existing solutions can do the job, but they are not open source and usually do not behave well as a tray utility. This project provides a simple, modern, and open-source alternative.
 
 ### Preview
-![Preview](https://cdn.jsdelivr.net/gh/ysc3839/AudioPlaybackConnector@master/AudioPlaybackConnector.gif)
+![Preview](https://cdn.jsdelivr.net/gh/meowhuan/AudioPlaybackConnector@master/AudioPlaybackConnector.gif)
 
 ### Usage
-* Download and run AudioPlaybackConnector from [releases](https://github.com/ysc3839/AudioPlaybackConnector/releases).
+* Download and run AudioPlaybackConnector from [releases](https://github.com/meowhuan/AudioPlaybackConnector/releases).
 * Add a Bluetooth device in Windows Bluetooth settings. You can right click the tray icon and select "Bluetooth Settings".
 * Click the AudioPlaybackConnector tray icon and select the device you want to connect.
 * Enjoy.
 
 ### Maintenance
 * This fork is the active maintenance branch focused on stability, audio experience, and release health.
+* The current `v1.2.x` line focuses on volume-pipeline fixes and output device selection; output routing now uses a delayed safe-attempt model, and `v1.1.0` remains the historical stability stage.
 * Roadmap, known constraints, and upstream issue mapping are documented in [docs/MAINTENANCE.md](docs/MAINTENANCE.md).
 * Issue triage rules and required diagnostic info are documented in [docs/ISSUE_TRIAGE.md](docs/ISSUE_TRIAGE.md).
 
