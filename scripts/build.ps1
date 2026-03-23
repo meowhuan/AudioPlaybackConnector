@@ -115,6 +115,11 @@ $nuget = Get-NuGetPath
 $msbuild = Get-MSBuildPath
 $windowsSdkVersion = Get-WindowsSdkVersion
 
+$env:TargetPlatformIdentifier = "Windows"
+$env:TargetPlatformVersion = $windowsSdkVersion
+$env:WindowsTargetPlatformVersion = $windowsSdkVersion
+$env:UseOSWinMdReferences = "true"
+
 Push-Location $repoRoot
 try {
     Invoke-TranslationGeneration
