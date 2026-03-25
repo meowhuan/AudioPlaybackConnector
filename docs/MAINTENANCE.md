@@ -13,6 +13,9 @@
 - 已加入单实例启动行为。
 - 已加入可选启动通知、开机自启、播放音量和连接时自动压低其他应用音量。
 - 已加入输出设备选择配置与设备枚举；当前实现改为双线并行：默认手动连接和自动重连固定走稳定播放主线，已连接时修改输出设备才进入实验热切线，先做 active session 确认，必要时最多执行一次软重连；打开设置页只允许刷新 UI，不得触发重连。
+- 已移除旧 XAML Islands 托盘 UI，改为 WinUI 3 主界面 + 原生托盘宿主：左键托盘图标打开 GUI，右键托盘图标打开快捷设置。
+- 当前前后端已通过命名管道命令与事件流联通；WinUI 3 可实时获取后端状态，并请求连接、断开、打开设备选择器、重载设置和退出。
+- 当前 WinUI 3 主界面默认使用简体中文，并已按 `Android-Cam-Bridge` 的桌面布局思路重构为左侧导航 + 顶部摘要 + 分区内容。
 - 当前诊断日志会额外记录会话对应的进程名、可执行路径和宿主类型，便于在干净环境中识别真实出声宿主。
 - 当前经验表明，连接链路上的重度会话诊断会干扰建链，因此会话快照仍仅保留在连接稳定后的输出设备设置变更场景，并合并为单次延迟快照；稳定播放主线不再受实验热切逻辑影响。
 - 已更新构建与发布流程，适配当前 Visual Studio 2022 和 GitHub Actions。
@@ -101,6 +104,9 @@ This fork is the active maintenance branch for AudioPlaybackConnector.
 - Single-instance startup behavior has been added.
 - Optional startup notification, auto-start, playback volume, and ducking of other apps have been added.
 - Output device selection settings and device enumeration have been added; the current focus is researching whether the real playback host behind `AudioPlaybackConnection` exposes any controllable surface, so output switching remains diagnostic/research-only for now.
+- The old XAML Islands tray UI has been removed in favor of a WinUI 3 main window plus a native tray host: left click opens the GUI and right click opens quick settings.
+- The frontend and backend now communicate through named-pipe commands and a live event stream; the WinUI 3 shell can request connect/disconnect, picker opening, settings reload, and clean exit while receiving real-time backend state updates.
+- The WinUI 3 main window now defaults to Simplified Chinese and follows an `Android-Cam-Bridge` style desktop composition: left navigation, top summary cards, and sectioned content.
 - Current diagnostics also record the session process name, executable path, and host type so a clean capture can identify the real playback host more directly.
 - Current evidence shows that heavy session diagnostics on the connection path can interfere with connection establishment, so diagnostics are now limited to a single delayed snapshot after output-device changes while the connection is already stable.
 - The build and release workflow has been updated for current Visual Studio 2022 and GitHub Actions.

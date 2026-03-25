@@ -1,0 +1,261 @@
+<Window
+    x:Class="AudioPlaybackConnector.WinUI3.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:AudioPlaybackConnector.WinUI3.Models"
+    mc:Ignorable="d"
+    Title="AudioPlaybackConnector">
+
+    <Grid Background="{ThemeResource AppChromeBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="44" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="WindowTitleBar" Grid.Row="0" Height="40" Margin="14,2,14,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="TitleBarLeftInsetColumn" Width="0" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="TitleBarRightInsetColumn" Width="0" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10" Margin="12,-2,0,0">
+                <TextBlock x:Name="TitleBarAppNameText" Text="AudioPlaybackConnector" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <Border Width="1" Height="12" Background="{ThemeResource AppCardBorderBrush}" VerticalAlignment="Center" />
+                <TextBlock x:Name="TitleBarSubtitleText" Text="蓝牙音频接收控制台" FontSize="12" Foreground="{ThemeResource AppMutedForegroundBrush}" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Spacing="6" Margin="0,-2,10,0">
+                <Border Style="{StaticResource TitleChipStyle}">
+                    <TextBlock x:Name="TitleBarLanguageChipText" Text="简体中文" />
+                </Border>
+                <Border Style="{StaticResource TitleAccentChipStyle}">
+                    <TextBlock Text="{x:Bind ViewModel.LegacyHostState, Mode=OneWay}" />
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="250" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Margin="14,12,8,14" Style="{StaticResource PaneCardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Spacing="8">
+                        <Button x:Name="OverviewSectionButton" Style="{StaticResource NavChipStyle}" Click="OnShowOverviewSection">
+                            <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE80F;" FontFamily="Segoe Fluent Icons" /><TextBlock Text="概览" /></StackPanel>
+                        </Button>
+                        <Button x:Name="DevicesSectionButton" Style="{StaticResource NavChipStyle}" Click="OnShowDevicesSection">
+                            <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE7F8;" FontFamily="Segoe Fluent Icons" /><TextBlock Text="设备" /></StackPanel>
+                        </Button>
+                        <Button x:Name="AudioSectionButton" Style="{StaticResource NavChipStyle}" Click="OnShowAudioSection">
+                            <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE995;" FontFamily="Segoe Fluent Icons" /><TextBlock Text="音频" /></StackPanel>
+                        </Button>
+                        <Button x:Name="LogsSectionButton" Style="{StaticResource NavChipStyle}" Click="OnShowLogsSection">
+                            <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE8A5;" FontFamily="Segoe Fluent Icons" /><TextBlock Text="日志" /></StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <Border Grid.Row="1" Style="{StaticResource SectionCardStyle}">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="界面模式" FontWeight="SemiBold" />
+                            <TextBlock Text="WinUI 3 主界面" />
+                            <TextBlock Foreground="{ThemeResource AppMutedForegroundBrush}" Text="默认语言：简体中文" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="1" Margin="8,12,14,14">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Margin="0,0,0,12" Style="{StaticResource PaneCardStyle}">
+                    <Grid ColumnSpacing="18">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Spacing="6">
+                            <TextBlock x:Name="CurrentSectionTitleText" Text="概览" FontSize="30" FontWeight="SemiBold" />
+                            <TextBlock x:Name="CurrentSectionSubtitleText" Text="查看实时状态、后端连接和当前蓝牙接收主线。" Foreground="{ThemeResource AppMutedForegroundBrush}" TextWrapping="WrapWholeWords" />
+                        </StackPanel>
+
+                        <Grid Grid.Column="1" ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="180" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Style="{StaticResource SummaryCardStyle}"><StackPanel><TextBlock Text="蓝牙设备" Foreground="{ThemeResource AppMutedForegroundBrush}" /><TextBlock Text="{x:Bind ViewModel.BluetoothDeviceCountText, Mode=OneWay}" FontSize="18" FontWeight="SemiBold" /></StackPanel></Border>
+                            <Border Grid.Column="1" Style="{StaticResource SummaryCardStyle}"><StackPanel><TextBlock Text="已连接" Foreground="{ThemeResource AppMutedForegroundBrush}" /><TextBlock Text="{x:Bind ViewModel.ConnectedBluetoothDeviceCountText, Mode=OneWay}" FontSize="18" FontWeight="SemiBold" /></StackPanel></Border>
+                            <Border Grid.Column="2" Style="{StaticResource SummaryCardStyle}"><StackPanel><TextBlock Text="输出端点" Foreground="{ThemeResource AppMutedForegroundBrush}" /><TextBlock Text="{x:Bind ViewModel.OutputDeviceCountText, Mode=OneWay}" FontSize="18" FontWeight="SemiBold" /></StackPanel></Border>
+                            <Border Grid.Column="3" Style="{StaticResource SummaryCardStyle}"><StackPanel><TextBlock Text="输出路由" Foreground="{ThemeResource AppMutedForegroundBrush}" /><TextBlock Text="{x:Bind ViewModel.PreferredOutputSummaryText, Mode=OneWay}" FontWeight="SemiBold" TextWrapping="WrapWholeWords" /></StackPanel></Border>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Margin="0,0,0,12" Style="{StaticResource PaneCardStyle}">
+                    <Grid ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="190" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="160" />
+                            <ColumnDefinition Width="160" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Spacing="6">
+                            <TextBlock Text="界面语言" Foreground="{ThemeResource AppMutedForegroundBrush}" />
+                            <ComboBox x:Name="LanguageBox" SelectedIndex="0" SelectionChanged="OnLanguageChanged">
+                                <ComboBoxItem Tag="zh-CN" Content="简体中文（默认）" />
+                                <ComboBoxItem Tag="en-US" Content="English" />
+                            </ComboBox>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Spacing="6">
+                            <TextBlock Text="主配置文件" Foreground="{ThemeResource AppMutedForegroundBrush}" />
+                            <TextBox IsReadOnly="True" Text="{x:Bind ViewModel.ConfigPath, Mode=OneWay}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" Spacing="6">
+                            <TextBlock Text="刷新与保存" Foreground="{ThemeResource AppMutedForegroundBrush}" />
+                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Button Grid.Column="0" Command="{x:Bind ViewModel.RefreshCommand}" Content="刷新" /><Button Grid.Column="1" Command="{x:Bind ViewModel.SaveSettingsCommand}" Content="保存" /></Grid>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="3" Spacing="6">
+                            <TextBlock Text="后端控制" Foreground="{ThemeResource AppMutedForegroundBrush}" />
+                            <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Button Grid.Column="0" Command="{x:Bind ViewModel.LaunchLegacyHostCommand}" Content="启动后端" /><Button Grid.Column="1" Command="{x:Bind ViewModel.StopLegacyHostCommand}" Content="退出后端" /></Grid>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="2">
+                    <ScrollViewer x:Name="OverviewSection" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="12">
+                            <Border Style="{StaticResource SectionCardStyle}">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="系统概览" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="{x:Bind ViewModel.StatusHeadline, Mode=OneWay}" FontSize="24" FontWeight="SemiBold" />
+                                    <TextBlock Text="{x:Bind ViewModel.StatusDetail, Mode=OneWay}" Foreground="{ThemeResource AppMutedForegroundBrush}" TextWrapping="WrapWholeWords" />
+                                    <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Grid.Column="0"><TextBlock Text="原生后端" Foreground="{ThemeResource AppMutedForegroundBrush}" /><TextBlock Text="{x:Bind ViewModel.LegacyHostState, Mode=OneWay}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind ViewModel.LegacyHostPath, Mode=OneWay}" TextWrapping="WrapWholeWords" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="配置文件位置" Foreground="{ThemeResource AppMutedForegroundBrush}" /><TextBlock Text="{x:Bind ViewModel.ConfigPath, Mode=OneWay}" TextWrapping="WrapWholeWords" /></StackPanel></Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource SectionCardStyle}">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="快捷动作" FontSize="18" FontWeight="SemiBold" />
+                                    <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Button Grid.Column="0" Command="{x:Bind ViewModel.OpenConfigFolderCommand}" Content="打开配置目录" /><Button Grid.Column="1" Command="{x:Bind ViewModel.OpenBluetoothSettingsCommand}" Content="蓝牙设置" /><Button Grid.Column="2" Command="{x:Bind ViewModel.OpenDevicePickerCommand}" Content="设备选择器" /><Button Grid.Column="3" Command="{x:Bind ViewModel.ReloadConfigCommand}" Content="重载配置" /></Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <Grid x:Name="DevicesSection" Visibility="Collapsed">
+                        <Grid ColumnSpacing="14"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Style="{StaticResource SectionCardStyle}">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="蓝牙播放设备" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="{x:Bind ViewModel.SelectedBluetoothDeviceSummary, Mode=OneWay}" Foreground="{ThemeResource AppMutedForegroundBrush}" TextWrapping="WrapWholeWords" />
+                                    <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Button Grid.Column="0" Command="{x:Bind ViewModel.ConnectSelectedDeviceCommand}" Content="连接选中设备" /><Button Grid.Column="1" Command="{x:Bind ViewModel.DisconnectSelectedDeviceCommand}" Content="断开选中设备" /></Grid>
+                                    <ListView Height="520" ItemsSource="{x:Bind ViewModel.BluetoothDevices, Mode=OneWay}" SelectedItem="{x:Bind ViewModel.SelectedBluetoothDevice, Mode=TwoWay}" SelectionMode="Single">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="models:BluetoothPlaybackDeviceInfo">
+                                                <Border Margin="0,0,0,10" Style="{StaticResource ItemCardStyle}">
+                                                    <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Spacing="4"><TextBlock FontSize="15" FontWeight="SemiBold" Text="{x:Bind DisplayName}" /><TextBlock Foreground="{ThemeResource AppMutedForegroundBrush}" Text="{x:Bind Id}" TextTrimming="CharacterEllipsis" /><TextBlock Foreground="{ThemeResource AppMutedForegroundBrush}" Text="{x:Bind Kind}" /></StackPanel><StackPanel Grid.Column="1" HorizontalAlignment="Right" Spacing="8"><Border Style="{StaticResource StatusChipStyle}"><TextBlock Text="{x:Bind PairingLabel}" /></Border><Border Style="{StaticResource StatusChipStyle}"><TextBlock Text="{x:Bind EnabledLabel}" /></Border><Border Style="{StaticResource StatusChipStyle}"><TextBlock Text="{x:Bind ConnectionLabel}" /></Border></StackPanel></Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Style="{StaticResource SectionCardStyle}">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="渲染输出设备" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="这里显示当前可用的 Windows 渲染端点与默认输出，方便观察路由目标。" Foreground="{ThemeResource AppMutedForegroundBrush}" TextWrapping="WrapWholeWords" />
+                                    <ListView Height="520" ItemsSource="{x:Bind ViewModel.OutputDevices, Mode=OneWay}" SelectionMode="None">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="models:OutputDeviceInfo">
+                                                <Border Margin="0,0,0,10" Style="{StaticResource ItemCardStyle}">
+                                                    <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Spacing="4"><TextBlock FontSize="15" FontWeight="SemiBold" Text="{x:Bind DisplayName}" /><TextBlock Foreground="{ThemeResource AppMutedForegroundBrush}" Text="{x:Bind Id}" TextTrimming="CharacterEllipsis" /></StackPanel><StackPanel Grid.Column="1" HorizontalAlignment="Right" Spacing="8"><Border Style="{StaticResource StatusChipStyle}" Visibility="{x:Bind DefaultBadgeVisibility}"><TextBlock Text="默认" /></Border><Border Style="{StaticResource StatusChipStyle}" Visibility="{x:Bind UnavailableBadgeVisibility}"><TextBlock Text="不可用" /></Border></StackPanel></Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+
+                    <Grid x:Name="AudioSection" Visibility="Collapsed">
+                        <Grid ColumnSpacing="14"><Grid.ColumnDefinitions><ColumnDefinition Width="420" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Style="{StaticResource SectionCardStyle}">
+                                <StackPanel Spacing="14">
+                                    <TextBlock Text="播放与自动化" FontSize="18" FontWeight="SemiBold" />
+                                    <ToggleSwitch Header="开机启动" IsOn="{x:Bind ViewModel.AutoStart, Mode=TwoWay}" />
+                                    <ToggleSwitch Header="下次启动自动重连" IsOn="{x:Bind ViewModel.Reconnect, Mode=TwoWay}" />
+                                    <TextBlock Text="播放音量" /><Slider Maximum="100" Minimum="0" Value="{x:Bind ViewModel.Volume, Mode=TwoWay}" /><TextBlock Text="{x:Bind ViewModel.VolumeText, Mode=OneWay}" HorizontalAlignment="Right" />
+                                    <ToggleSwitch Header="连接时降低其他应用音量" IsOn="{x:Bind ViewModel.DuckOtherApps, Mode=TwoWay}" />
+                                    <TextBlock Text="其他应用音量" /><Slider Maximum="100" Minimum="0" Value="{x:Bind ViewModel.DuckedAppsVolume, Mode=TwoWay}" /><TextBlock Text="{x:Bind ViewModel.DuckedAppsVolumeText, Mode=OneWay}" HorizontalAlignment="Right" />
+                                    <ToggleSwitch Header="显示启动通知" IsOn="{x:Bind ViewModel.ShowStartupToast, Mode=TwoWay}" />
+                                    <Button Command="{x:Bind ViewModel.SaveSettingsCommand}" Content="保存到后端配置" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Style="{StaticResource SectionCardStyle}">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Text="输出路由" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="这里的配置会写入共享配置，并通知原生后端立即重新加载。" Foreground="{ThemeResource AppMutedForegroundBrush}" TextWrapping="WrapWholeWords" />
+                                    <ComboBox DisplayMemberPath="DisplayName" Header="首选输出设备" ItemsSource="{x:Bind ViewModel.OutputDevices, Mode=OneWay}" SelectedValue="{x:Bind ViewModel.SelectedOutputDeviceId, Mode=TwoWay}" SelectedValuePath="Id" />
+                                    <TextBlock Foreground="{ThemeResource AppMutedForegroundBrush}" Text="{x:Bind ViewModel.SelectedOutputDeviceSummary, Mode=OneWay}" TextWrapping="WrapWholeWords" />
+                                    <TextBlock FontWeight="SemiBold" Text="重连目标" />
+                                    <ListView Height="320" ItemsSource="{x:Bind ViewModel.LastConnectedDevices, Mode=OneWay}" SelectionMode="None">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="x:String">
+                                                <Border Margin="0,0,0,8" Style="{StaticResource ItemCardStyle}">
+                                                    <TextBlock Text="{x:Bind}" TextWrapping="WrapWholeWords" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+
+                    <ScrollViewer x:Name="LogsSection" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="活动日志" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Text="这里会实时记录前端刷新、后端事件、配置写入和动作请求。" Foreground="{ThemeResource AppMutedForegroundBrush}" TextWrapping="WrapWholeWords" />
+                                <ListView Height="620" ItemsSource="{x:Bind ViewModel.LogEntries, Mode=OneWay}" SelectionMode="None">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="models:DebugLogEntry">
+                                            <Grid Margin="0,0,0,8" ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="72" /><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Foreground="{ThemeResource AppMutedForegroundBrush}" Text="{x:Bind TimestampLabel}" /><TextBlock FontWeight="SemiBold" Text="{x:Bind Category}" /><TextBlock Grid.Column="2" Text="{x:Bind Message}" TextWrapping="Wrap" /></Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </StackPanel>
+                        </Border>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

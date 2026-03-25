@@ -31,6 +31,9 @@
 #include <cstdlib>
 #include <optional>
 #include <string>
+#include <thread>
+#include <mutex>
+#include <atomic>
 #include <unordered_map>
 #include <unordered_set>
 #include <filesystem>

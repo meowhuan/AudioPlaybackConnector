@@ -343,3 +343,4 @@ translate/generated
 .tools/
 src/translate-toolkit/
 .packages/
+.dotnet

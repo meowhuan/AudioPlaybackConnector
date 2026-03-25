@@ -1,0 +1,100 @@
+<Application
+    x:Class="AudioPlaybackConnector.WinUI3.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <controls:XamlControlsResources />
+            </ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="AppChromeBackgroundBrush" Color="#00FFFFFF" />
+                    <SolidColorBrush x:Key="AppPaneBackgroundBrush" Color="#CCFCFCFD" />
+                    <SolidColorBrush x:Key="AppCardBackgroundBrush" Color="#F2FFFFFF" />
+                    <SolidColorBrush x:Key="AppCardBorderBrush" Color="#14000000" />
+                    <SolidColorBrush x:Key="AppOutputBackgroundBrush" Color="#F7F8FA" />
+                    <SolidColorBrush x:Key="AppMutedForegroundBrush" Color="#80303030" />
+                    <SolidColorBrush x:Key="AppNavInactiveBrush" Color="#14000000" />
+                    <SolidColorBrush x:Key="AppNavActiveBrush" Color="#1A0067C0" />
+                    <SolidColorBrush x:Key="AppAccentBrush" Color="#0A66C2" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="AppChromeBackgroundBrush" Color="#00FFFFFF" />
+                    <SolidColorBrush x:Key="AppPaneBackgroundBrush" Color="#CCFCFCFD" />
+                    <SolidColorBrush x:Key="AppCardBackgroundBrush" Color="#F2FFFFFF" />
+                    <SolidColorBrush x:Key="AppCardBorderBrush" Color="#14000000" />
+                    <SolidColorBrush x:Key="AppOutputBackgroundBrush" Color="#F7F8FA" />
+                    <SolidColorBrush x:Key="AppMutedForegroundBrush" Color="#80303030" />
+                    <SolidColorBrush x:Key="AppNavInactiveBrush" Color="#14000000" />
+                    <SolidColorBrush x:Key="AppNavActiveBrush" Color="#1A0067C0" />
+                    <SolidColorBrush x:Key="AppAccentBrush" Color="#0A66C2" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="AppChromeBackgroundBrush" Color="#00111111" />
+                    <SolidColorBrush x:Key="AppPaneBackgroundBrush" Color="#CC202020" />
+                    <SolidColorBrush x:Key="AppCardBackgroundBrush" Color="#CC2B2B2B" />
+                    <SolidColorBrush x:Key="AppCardBorderBrush" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="AppOutputBackgroundBrush" Color="#FF1E1E1E" />
+                    <SolidColorBrush x:Key="AppMutedForegroundBrush" Color="#B0D0D0D0" />
+                    <SolidColorBrush x:Key="AppNavInactiveBrush" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="AppNavActiveBrush" Color="#2A60CDFF" />
+                    <SolidColorBrush x:Key="AppAccentBrush" Color="#76B7FF" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <Style x:Key="PaneCardStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource AppPaneBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource AppCardBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="24" />
+                <Setter Property="Padding" Value="18" />
+            </Style>
+
+            <Style x:Key="SectionCardStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource AppCardBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource AppCardBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="16" />
+                <Setter Property="Padding" Value="16" />
+            </Style>
+
+            <Style x:Key="SummaryCardStyle" TargetType="Border" BasedOn="{StaticResource SectionCardStyle}">
+                <Setter Property="Padding" Value="12" />
+            </Style>
+
+            <Style x:Key="ItemCardStyle" TargetType="Border" BasedOn="{StaticResource SectionCardStyle}">
+                <Setter Property="Padding" Value="14" />
+            </Style>
+
+            <Style x:Key="NavChipStyle" TargetType="Button">
+                <Setter Property="CornerRadius" Value="14" />
+                <Setter Property="Padding" Value="12,10" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="Background" Value="{ThemeResource AppNavInactiveBrush}" />
+            </Style>
+
+            <Style x:Key="StatusChipStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource AppNavActiveBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource AppCardBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="999" />
+                <Setter Property="Padding" Value="10,4" />
+            </Style>
+
+            <Style x:Key="TitleChipStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource AppCardBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource AppCardBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="11" />
+                <Setter Property="Padding" Value="10,0" />
+                <Setter Property="Height" Value="28" />
+            </Style>
+
+            <Style x:Key="TitleAccentChipStyle" TargetType="Border" BasedOn="{StaticResource TitleChipStyle}">
+                <Setter Property="Background" Value="{ThemeResource AppNavActiveBrush}" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

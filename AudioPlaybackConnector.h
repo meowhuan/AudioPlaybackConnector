@@ -18,6 +18,7 @@ using Clock = std::chrono::steady_clock;
 constexpr UINT WM_NOTIFYICON = WM_APP + 1;
 constexpr UINT WM_CONNECTDEVICE = WM_APP + 2;
 constexpr UINT WM_SHOW_DEVICEPICKER_FROM_OTHER_INSTANCE = WM_APP + 3;
+constexpr UINT WM_BACKEND_PIPE_COMMAND = WM_APP + 4;
 
 constexpr wchar_t UNIQUE_MUTEX_NAME[] = L"{019730ef-fcc8-7f5a-94b3-8b77d764a65f}";
 
@@ -45,9 +46,15 @@ Flyout g_settingsFlyout = nullptr;
 MenuFlyout g_xamlMenu = nullptr;
 FocusState g_menuFocusState = FocusState::Unfocused;
 DevicePicker g_devicePicker = nullptr;
+HMENU g_trayMenu = nullptr;
 std::unordered_map<std::wstring, std::pair<DeviceInformation, AudioPlaybackConnection>> g_audioPlaybackConnections;
 std::unordered_map<std::wstring, Clock::time_point> g_lastCloseTime;
 std::unordered_map<std::wstring, DuckedSessionInfo> g_duckedSessions;
+std::vector<HANDLE> g_backendEventPipeClients;
+std::mutex g_backendEventPipeClientsMutex;
+std::thread g_backendCommandPipeThread;
+std::thread g_backendEventPipeThread;
+HANDLE g_backendPipeStopEvent = nullptr;
 CheckBox g_autoStartCheckBox = nullptr;
 ComboBox g_outputDeviceComboBox = nullptr;
 Slider g_volumeSlider = nullptr;
@@ -83,6 +90,8 @@ std::wstring g_activeOutputDeviceId;
 uint64_t g_outputDeviceSnapshotToken = 0;
 uint64_t g_outputRoutingToken = 0;
 bool g_outputSwitchSoftReconnectInProgress = false;
+std::wstring g_startupBackendCommand;
+std::wstring g_startupGuiCommand = L"show";
 
 #include "Util.hpp"
 #include "I18n.hpp"

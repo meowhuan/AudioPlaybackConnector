@@ -22,8 +22,19 @@ void ApplyOwnSessionVolume(std::wstring_view);
 void ApplyDuckingPolicy();
 void RestoreDuckedSessions();
 void ApplyOutputDeviceRouting(std::wstring_view);
+void SetupTrayMenu();
+void ShowTrayMenu();
+void ShowMainGui(std::wstring_view = L"show");
+void StartBackendPipes();
+void StopBackendPipes();
+void PublishBackendState(std::wstring_view, bool isRunning = true);
+void ReloadSettingsAndApply();
+void ExecuteBackendCommand(std::wstring_view);
+void SaveRuntimeStateNoThrow(std::wstring_view, bool isRunning = true);
 winrt::fire_and_forget ConfirmOutputRoutingAfterOpen(std::wstring, AudioPlaybackConnection, std::wstring, bool, uint64_t);
+winrt::fire_and_forget WaitForSessionThenApplyVolume(std::wstring, AudioPlaybackConnection, std::wstring);
 IAsyncAction SoftReconnectAllConnectionsForOutputSwitch(uint64_t);
+winrt::fire_and_forget DisconnectDeviceById(std::wstring_view);
 void ShowInitialToastNotification();
 
 namespace
@@ -37,6 +48,19 @@ namespace
 	constexpr wchar_t DEFAULT_OUTPUT_DEVICE_ITEM_ID[] = L"";
 	constexpr wchar_t DEFAULT_OUTPUT_DEVICE_ITEM_NAME[] = L"Default output device";
 	constexpr wchar_t UNAVAILABLE_OUTPUT_DEVICE_ITEM_PREFIX[] = L"[Unavailable] ";
+	constexpr wchar_t RUNTIME_STATE_NAME[] = L"AudioPlaybackConnector.runtime.json";
+	constexpr wchar_t BACKEND_DIAGNOSTIC_LOG_NAME[] = L"AudioPlaybackConnector.backend.log";
+	constexpr wchar_t COMMAND_PIPE_NAME[] = LR"(\\.\pipe\AudioPlaybackConnector.Command)";
+	constexpr wchar_t EVENT_PIPE_NAME[] = LR"(\\.\pipe\AudioPlaybackConnector.Events)";
+	constexpr ULONG_PTR BACKEND_COMMAND_COPYDATA_ID = 0x41504343;
+	constexpr UINT ID_TRAY_OPEN_APP = 1001;
+	constexpr UINT ID_TRAY_OPEN_PICKER = 1002;
+	constexpr UINT ID_TRAY_AUTOSTART = 1003;
+	constexpr UINT ID_TRAY_RECONNECT = 1004;
+	constexpr UINT ID_TRAY_DUCK = 1005;
+	constexpr UINT ID_TRAY_STARTUP_TOAST = 1006;
+	constexpr UINT ID_TRAY_BLUETOOTH_SETTINGS = 1007;
+	constexpr UINT ID_TRAY_EXIT = 1008;
 
 	struct DECLSPEC_UUID("870af99c-171d-4f9e-9083-f5377e6a3555") IPolicyConfig2 : ::IUnknown
 	{
@@ -68,6 +92,406 @@ namespace
 	{
 		auto it = g_audioPlaybackConnections.find(std::wstring(deviceId));
 		return it != g_audioPlaybackConnections.end() && it->second.second == connection;
+	}
+
+	std::wstring SerializeBackendCommand(std::wstring_view verb, std::wstring_view payload = {})
+	{
+		if (payload.empty())
+		{
+			return std::wstring(verb);
+		}
+
+		return std::wstring(verb) + L"\n" + std::wstring(payload);
+	}
+
+	std::pair<std::wstring, std::wstring> ParseBackendCommand(std::wstring_view command)
+	{
+		const auto separator = command.find(L'\n');
+		if (separator == std::wstring_view::npos)
+		{
+			return { std::wstring(command), {} };
+		}
+
+		return {
+			std::wstring(command.substr(0, separator)),
+			std::wstring(command.substr(separator + 1))
+		};
+	}
+
+	std::optional<std::wstring> BuildStartupBackendCommand()
+	{
+		int argc = 0;
+		auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+		if (!argv)
+		{
+			return std::nullopt;
+		}
+
+		auto freeArgv = wil::scope_exit([&] { LocalFree(argv); });
+		if (argc <= 1)
+		{
+			return std::nullopt;
+		}
+
+		const std::wstring verb = argv[1];
+		if (_wcsicmp(verb.c_str(), L"picker") == 0)
+		{
+			return SerializeBackendCommand(L"picker");
+		}
+
+		if (_wcsicmp(verb.c_str(), L"show") == 0)
+		{
+			return SerializeBackendCommand(L"show-gui");
+		}
+
+		if (_wcsicmp(verb.c_str(), L"exit") == 0)
+		{
+			return SerializeBackendCommand(L"exit");
+		}
+
+		if (_wcsicmp(verb.c_str(), L"reload-settings") == 0)
+		{
+			return SerializeBackendCommand(L"reload-settings");
+		}
+
+		if ((_wcsicmp(verb.c_str(), L"connect") == 0 || _wcsicmp(verb.c_str(), L"disconnect") == 0) && argc >= 3)
+		{
+			return SerializeBackendCommand(verb, argv[2]);
+		}
+
+		return std::nullopt;
+	}
+
+	bool TrySendBackendCommandToWindow(HWND hWnd, std::wstring_view command)
+	{
+		if (!hWnd)
+		{
+			return false;
+		}
+
+		COPYDATASTRUCT copyData{};
+		copyData.dwData = BACKEND_COMMAND_COPYDATA_ID;
+		copyData.cbData = static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t));
+		copyData.lpData = const_cast<wchar_t*>(command.data());
+
+		LRESULT result = 0;
+		return SendMessageTimeoutW(
+			hWnd,
+			WM_COPYDATA,
+			0,
+			reinterpret_cast<LPARAM>(&copyData),
+			SMTO_ABORTIFHUNG,
+			2000,
+			reinterpret_cast<PDWORD_PTR>(&result)
+		) != 0;
+	}
+
+	std::optional<fs::path> ResolveRepositoryRootFromModule()
+	{
+		auto current = GetModuleFsPath(g_hInst).remove_filename();
+		while (!current.empty())
+		{
+			if (fs::exists(current / L"AudioPlaybackConnector.sln") || fs::exists(current / L".git"))
+			{
+				return current;
+			}
+
+			if (current == current.root_path())
+			{
+				break;
+			}
+			current = current.parent_path();
+		}
+
+		return std::nullopt;
+	}
+
+	std::optional<fs::path> ResolveGuiExecutablePath()
+	{
+		const auto hostDirectory = GetModuleFsPath(g_hInst).remove_filename();
+		const std::vector<fs::path> directCandidates = {
+			hostDirectory.parent_path() / L"AudioPlaybackConnector.WinUI3.exe",
+			hostDirectory / L"AudioPlaybackConnector.WinUI3.exe"
+		};
+
+		for (const auto& candidate : directCandidates)
+		{
+			if (fs::exists(candidate))
+			{
+				return candidate;
+			}
+		}
+
+		const auto repoRoot = ResolveRepositoryRootFromModule();
+		if (!repoRoot.has_value())
+		{
+			return std::nullopt;
+		}
+
+		const auto binRoot = repoRoot.value() / L"src" / L"AudioPlaybackConnector.WinUI3" / L"bin";
+		if (!fs::exists(binRoot))
+		{
+			return std::nullopt;
+		}
+
+		const auto platformName = hostDirectory.parent_path().filename();
+		const auto configurationName = hostDirectory.filename();
+		const auto preferredRoot = binRoot / platformName / configurationName;
+		std::vector<fs::path> matches;
+
+		auto collect = [&](const fs::path& root) {
+			if (!fs::exists(root))
+			{
+				return;
+			}
+
+			for (const auto& entry : fs::recursive_directory_iterator(root))
+			{
+				if (entry.is_regular_file() && entry.path().filename() == L"AudioPlaybackConnector.WinUI3.exe")
+				{
+					matches.push_back(entry.path());
+				}
+			}
+		};
+
+		collect(preferredRoot);
+		if (matches.empty())
+		{
+			collect(binRoot);
+		}
+
+		if (!matches.empty())
+		{
+			std::sort(matches.begin(), matches.end(), [](const auto& left, const auto& right) {
+				const auto leftStable = left.wstring().find(L"net8.0") != std::wstring::npos;
+				const auto rightStable = right.wstring().find(L"net8.0") != std::wstring::npos;
+				if (leftStable != rightStable)
+				{
+					return leftStable;
+				}
+
+				return fs::last_write_time(left) > fs::last_write_time(right);
+			});
+			return matches.front();
+		}
+
+		return std::nullopt;
+	}
+
+	bool WritePipeUtf8Message(HANDLE pipe, std::string_view utf8)
+	{
+		const auto payload = utf8.empty() ? std::string() : std::string(utf8);
+		DWORD written = 0;
+		if (!WriteFile(pipe, payload.data(), static_cast<DWORD>(payload.size()), &written, nullptr))
+		{
+			return false;
+		}
+
+		return written == payload.size();
+	}
+
+	bool WritePipeUtf8Line(HANDLE pipe, std::string_view utf8)
+	{
+		std::string payload(utf8);
+		payload.push_back('\n');
+		return WritePipeUtf8Message(pipe, payload);
+	}
+
+	std::optional<std::string> ReadPipeUtf8Message(HANDLE pipe)
+	{
+		std::string message;
+		char buffer[2048];
+
+		for (;;)
+		{
+			DWORD read = 0;
+			if (ReadFile(pipe, buffer, sizeof(buffer), &read, nullptr))
+			{
+				if (read == 0)
+				{
+					break;
+				}
+
+				message.append(buffer, read);
+				break;
+			}
+
+			if (GetLastError() == ERROR_MORE_DATA)
+			{
+				message.append(buffer, read);
+				continue;
+			}
+
+			return std::nullopt;
+		}
+
+		while (!message.empty() && (message.back() == '\0' || message.back() == '\n' || message.back() == '\r'))
+		{
+			message.pop_back();
+		}
+
+		return message;
+	}
+
+	void CloseAllBackendEventClients()
+	{
+		std::lock_guard lock(g_backendEventPipeClientsMutex);
+		for (auto pipe : g_backendEventPipeClients)
+		{
+			if (pipe)
+			{
+				DisconnectNamedPipe(pipe);
+				CloseHandle(pipe);
+			}
+		}
+		g_backendEventPipeClients.clear();
+	}
+
+	void BroadcastBackendEventUtf8(std::string_view utf8)
+	{
+		std::lock_guard lock(g_backendEventPipeClientsMutex);
+		for (auto it = g_backendEventPipeClients.begin(); it != g_backendEventPipeClients.end();)
+		{
+			if (!WritePipeUtf8Line(*it, utf8))
+			{
+				DisconnectNamedPipe(*it);
+				CloseHandle(*it);
+				it = g_backendEventPipeClients.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
+	}
+
+	void AppendBackendDiagnosticLog(std::wstring_view line)
+	{
+		const auto path = GetModuleFsPath(g_hInst).remove_filename() / BACKEND_DIAGNOSTIC_LOG_NAME;
+		wil::unique_hfile hFile(CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+		if (!hFile)
+		{
+			return;
+		}
+
+		const auto message = Utf16ToUtf8(std::wstring(line) + L"\r\n");
+		DWORD written = 0;
+		WriteFile(hFile.get(), message.data(), static_cast<DWORD>(message.size()), &written, nullptr);
+	}
+
+	void WakeBackendPipeServers()
+	{
+		auto wakePipe = [](const wchar_t* pipeName) {
+			wil::unique_handle client(CreateFileW(pipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+			if (client)
+			{
+				const char newline = '\n';
+				DWORD written = 0;
+				WriteFile(client.get(), &newline, 1, &written, nullptr);
+			}
+		};
+
+		wakePipe(COMMAND_PIPE_NAME);
+		wakePipe(EVENT_PIPE_NAME);
+	}
+
+	void BackendCommandPipeThreadProc()
+	{
+		while (WaitForSingleObject(g_backendPipeStopEvent, 0) == WAIT_TIMEOUT)
+		{
+			wil::unique_handle pipe(CreateNamedPipeW(
+				COMMAND_PIPE_NAME,
+				PIPE_ACCESS_DUPLEX,
+				PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+				PIPE_UNLIMITED_INSTANCES,
+				4096,
+				4096,
+				0,
+				nullptr
+			));
+			if (!pipe)
+			{
+				Sleep(250);
+				continue;
+			}
+
+			const bool connected = ConnectNamedPipe(pipe.get(), nullptr) != FALSE || GetLastError() == ERROR_PIPE_CONNECTED;
+			if (!connected)
+			{
+				continue;
+			}
+
+			if (WaitForSingleObject(g_backendPipeStopEvent, 0) != WAIT_TIMEOUT)
+			{
+				DisconnectNamedPipe(pipe.get());
+				break;
+			}
+
+			const auto utf8Command = ReadPipeUtf8Message(pipe.get());
+			if (utf8Command.has_value() && !utf8Command->empty())
+			{
+				auto command = new std::wstring(Utf8ToUtf16(*utf8Command));
+				if (!command->empty() && (*command)[0] == 0xFEFF)
+				{
+					command->erase(command->begin());
+				}
+				if (!PostMessageW(g_hWnd, WM_BACKEND_PIPE_COMMAND, 0, reinterpret_cast<LPARAM>(command)))
+				{
+					delete command;
+				}
+			}
+
+			WritePipeUtf8Line(pipe.get(), R"({"accepted":true})");
+			FlushFileBuffers(pipe.get());
+			DisconnectNamedPipe(pipe.get());
+		}
+	}
+
+	void BackendEventPipeThreadProc()
+	{
+		while (WaitForSingleObject(g_backendPipeStopEvent, 0) == WAIT_TIMEOUT)
+		{
+			auto rawPipe = CreateNamedPipeW(
+				EVENT_PIPE_NAME,
+				PIPE_ACCESS_OUTBOUND,
+				PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+				PIPE_UNLIMITED_INSTANCES,
+				4096,
+				4096,
+				0,
+				nullptr
+			);
+			if (rawPipe == INVALID_HANDLE_VALUE)
+			{
+				Sleep(250);
+				continue;
+			}
+
+			const bool connected = ConnectNamedPipe(rawPipe, nullptr) != FALSE || GetLastError() == ERROR_PIPE_CONNECTED;
+			if (!connected)
+			{
+				CloseHandle(rawPipe);
+				continue;
+			}
+
+			if (WaitForSingleObject(g_backendPipeStopEvent, 0) != WAIT_TIMEOUT)
+			{
+				DisconnectNamedPipe(rawPipe);
+				CloseHandle(rawPipe);
+				break;
+			}
+
+			{
+				std::lock_guard lock(g_backendEventPipeClientsMutex);
+				g_backendEventPipeClients.push_back(rawPipe);
+			}
+
+			auto command = new std::wstring(SerializeBackendCommand(L"publish-state"));
+			if (!PostMessageW(g_hWnd, WM_BACKEND_PIPE_COMMAND, 0, reinterpret_cast<LPARAM>(command)))
+			{
+				delete command;
+			}
+		}
 	}
 
 	void MarkDeviceClosed(std::wstring_view deviceId)
@@ -413,6 +837,9 @@ namespace
 		return source == L"output-switch-soft-reconnect";
 	}
 
+	// Returns true when we need to actively confirm that the current-process
+	// audio session has migrated to the target output device and potentially
+	// trigger a soft-reconnect if it has not done so within the timeout.
 	bool ShouldConfirmOutputRouting(std::wstring_view source)
 	{
 		if (g_outputDeviceId.empty())
@@ -420,12 +847,22 @@ namespace
 			return false;
 		}
 
-		return source == L"output-switch-soft-reconnect";
+		return source == L"output-switch-soft-reconnect"
+			|| source == L"settings-output-device-change";
+	}
+
+	// Returns true when we should wait for the current-process audio session to
+	// appear before applying volume / ducking, regardless of whether any output
+	// routing is configured.  This prevents the race where ApplyOwnSessionVolume
+	// is called before the Bluetooth audio session has been registered by the OS.
+	bool ShouldWaitForSessionBeforeApplyingVolume(std::wstring_view source)
+	{
+		return source == L"manual-picker" || source == L"manual-command" || source == L"auto-reconnect";
 	}
 
 	bool ShouldDelayAudioProcessingUntilRoutingConfirmed(std::wstring_view source)
 	{
-		return ShouldConfirmOutputRouting(source);
+		return ShouldConfirmOutputRouting(source) || ShouldWaitForSessionBeforeApplyingVolume(source);
 	}
 
 	std::optional<CurrentProcessSessionLocation> FindCurrentProcessSessionLocation()
@@ -640,6 +1077,19 @@ namespace
 		return GetDefaultRenderDevice(deviceEnumerator.get());
 	}
 
+	const wchar_t* ToConnectionStateString(AudioPlaybackConnectionState state)
+	{
+		switch (state)
+		{
+		case AudioPlaybackConnectionState::Opened:
+			return L"opened";
+		case AudioPlaybackConnectionState::Closed:
+			return L"closed";
+		default:
+			return L"unknown";
+		}
+	}
+
 	winrt::com_ptr<IAudioSessionManager2> CreateTargetSessionManager()
 	{
 		auto device = GetCurrentRenderDevice();
@@ -751,11 +1201,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	_In_ int       nCmdShow)
 {
 	UNREFERENCED_PARAMETER(hPrevInstance);
-	UNREFERENCED_PARAMETER(lpCmdLine);
 	UNREFERENCED_PARAMETER(nCmdShow);
+	UNREFERENCED_PARAMETER(lpCmdLine);
 
 	g_hInst = hInstance;
 	LoadTranslateData();
+	auto startupCommand = BuildStartupBackendCommand();
 
 	g_hMutex = CreateMutexW(nullptr, TRUE, UNIQUE_MUTEX_NAME);
 	if (!g_hMutex)
@@ -773,7 +1224,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		if (hExistingWnd)
 		{
 			SetForegroundWindow(hExistingWnd);
-			PostMessageW(hExistingWnd, WM_SHOW_DEVICEPICKER_FROM_OTHER_INSTANCE, 0, 0);
+			if (startupCommand.has_value())
+			{
+				TrySendBackendCommandToWindow(hExistingWnd, startupCommand.value());
+			}
+			else
+			{
+				TrySendBackendCommandToWindow(hExistingWnd, SerializeBackendCommand(L"show-gui"));
+			}
 		}
 		else
 		{
@@ -789,8 +1247,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	{
 		using namespace winrt::Windows::Foundation::Metadata;
 
-		supported = ApiInformation::IsTypePresent(winrt::name_of<DesktopWindowXamlSource>()) &&
-			ApiInformation::IsTypePresent(winrt::name_of<AudioPlaybackConnection>());
+		supported = ApiInformation::IsTypePresent(winrt::name_of<AudioPlaybackConnection>()) &&
+			ApiInformation::IsTypePresent(winrt::name_of<DevicePicker>());
 	}
 	catch (winrt::hresult_error const&)
 	{
@@ -820,20 +1278,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	FAIL_FAST_LAST_ERROR_IF_NULL(g_hWnd);
 	FAIL_FAST_IF_WIN32_BOOL_FALSE(SetLayeredWindowAttributes(g_hWnd, 0, 0, LWA_ALPHA));
 
-	DesktopWindowXamlSource desktopSource;
-	auto desktopSourceNative2 = desktopSource.as<IDesktopWindowXamlSourceNative2>();
-	winrt::check_hresult(desktopSourceNative2->AttachToWindow(g_hWnd));
-	winrt::check_hresult(desktopSourceNative2->get_WindowHandle(&g_hWndXaml));
-
-	g_xamlCanvas = Canvas();
-	desktopSource.Content(g_xamlCanvas);
-
 	LoadSettings();
-	SetupFlyout();
-	SetupSettingsFlyout();
-	SetupMenu();
 	SetupDevicePicker();
+	SetupTrayMenu();
 	SetupSvgIcon();
+	StartBackendPipes();
 
 	g_nid.hWnd = g_niid.hWnd = g_hWnd;
 	wcscpy_s(g_nid.szTip, _(L"AudioPlaybackConnector"));
@@ -841,20 +1290,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 	WM_TASKBAR_CREATED = RegisterWindowMessageW(L"TaskbarCreated");
 	LOG_LAST_ERROR_IF(WM_TASKBAR_CREATED == 0);
+	g_startupBackendCommand = startupCommand.value_or(L"");
+	SaveRuntimeStateNoThrow(L"startup");
 
 	PostMessageW(g_hWnd, WM_CONNECTDEVICE, 0, 0);
 	ShowInitialToastNotification();
+	if (!g_startupBackendCommand.empty())
+	{
+		ExecuteBackendCommand(g_startupBackendCommand);
+		g_startupBackendCommand.clear();
+	}
 
 	MSG msg;
 	while (GetMessageW(&msg, nullptr, 0, 0))
 	{
-		BOOL processed = FALSE;
-		winrt::check_hresult(desktopSourceNative2->PreTranslateMessage(&msg, &processed));
-		if (!processed)
-		{
-			TranslateMessage(&msg);
-			DispatchMessageW(&msg);
-		}
+		TranslateMessage(&msg);
+		DispatchMessageW(&msg);
 	}
 
 	return static_cast<int>(msg.wParam);
@@ -889,7 +1340,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			g_audioPlaybackConnections.clear();
 			SaveSettings();
 		}
+		g_activeOutputDeviceId.clear();
+		StopBackendPipes();
+		SaveRuntimeStateNoThrow(L"shutdown", false);
 		Shell_NotifyIconW(NIM_DELETE, &g_nid);
+		if (g_trayMenu)
+		{
+			DestroyMenu(g_trayMenu);
+			g_trayMenu = nullptr;
+		}
 		if (g_hMutex)
 		{
 			ReleaseMutex(g_hMutex);
@@ -901,6 +1360,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_SHOW_DEVICEPICKER_FROM_OTHER_INSTANCE:
 		ShowDevicePickerFromTray();
 		break;
+	case WM_BACKEND_PIPE_COMMAND:
+	{
+		auto command = reinterpret_cast<std::wstring*>(lParam);
+		if (command)
+		{
+			ExecuteBackendCommand(*command);
+			delete command;
+			return 0;
+		}
+	}
+	break;
+	case WM_COPYDATA:
+	{
+		auto copyData = reinterpret_cast<COPYDATASTRUCT*>(lParam);
+		if (copyData &&
+			copyData->dwData == BACKEND_COMMAND_COPYDATA_ID &&
+			copyData->lpData &&
+			copyData->cbData >= sizeof(wchar_t))
+		{
+			const auto length = (copyData->cbData / sizeof(wchar_t)) - 1;
+			const std::wstring_view command(static_cast<const wchar_t*>(copyData->lpData), length);
+			ExecuteBackendCommand(command);
+			return TRUE;
+		}
+	}
+	break;
 	case WM_SETTINGCHANGE:
 		if (lParam && CompareStringOrdinal(reinterpret_cast<LPCWCH>(lParam), -1, L"ImmersiveColorSet", -1, TRUE) == CSTR_EQUAL)
 		{
@@ -912,29 +1397,59 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 		case NIN_SELECT:
 		case NIN_KEYSELECT:
-			ShowDevicePickerFromTray();
+		case WM_LBUTTONUP:
+		case WM_LBUTTONDBLCLK:
+			ShowMainGui();
 			break;
 		case WM_RBUTTONUP:
-			g_menuFocusState = FocusState::Pointer;
-			break;
 		case WM_CONTEXTMENU:
-		{
-			if (g_menuFocusState == FocusState::Unfocused)
-				g_menuFocusState = FocusState::Keyboard;
-
-			auto dpi = GetDpiForWindow(hWnd);
-			Point point = {
-				static_cast<float>(GET_X_LPARAM(wParam) * USER_DEFAULT_SCREEN_DPI / dpi),
-				static_cast<float>(GET_Y_LPARAM(wParam) * USER_DEFAULT_SCREEN_DPI / dpi)
-			};
-
-			SetWindowPos(g_hWndXaml, 0, 0, 0, 0, 0, SWP_NOZORDER | SWP_SHOWWINDOW);
-			SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, 1, 1, SWP_SHOWWINDOW);
-			SetForegroundWindow(hWnd);
-
-			g_xamlMenu.ShowAt(g_xamlCanvas, point);
+			ShowTrayMenu();
+			break;
 		}
 		break;
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case ID_TRAY_OPEN_APP:
+			ShowMainGui();
+			return 0;
+		case ID_TRAY_OPEN_PICKER:
+			ShowDevicePickerFromTray();
+			return 0;
+		case ID_TRAY_AUTOSTART:
+			g_autoStart = !g_autoStart;
+			SaveSettings();
+			SaveRuntimeStateNoThrow(L"tray-toggle-autostart");
+			return 0;
+		case ID_TRAY_RECONNECT:
+			g_reconnect = !g_reconnect;
+			SaveSettings();
+			SaveRuntimeStateNoThrow(L"tray-toggle-reconnect");
+			return 0;
+		case ID_TRAY_DUCK:
+			g_duckOtherApps = !g_duckOtherApps;
+			if (g_duckOtherApps)
+			{
+				ApplyDuckingPolicy();
+			}
+			else
+			{
+				RestoreDuckedSessions();
+			}
+			SaveSettings();
+			SaveRuntimeStateNoThrow(L"tray-toggle-duck");
+			return 0;
+		case ID_TRAY_STARTUP_TOAST:
+			g_showStartupToast = !g_showStartupToast;
+			SaveSettings();
+			SaveRuntimeStateNoThrow(L"tray-toggle-startup-toast");
+			return 0;
+		case ID_TRAY_BLUETOOTH_SETTINGS:
+			winrt::Windows::System::Launcher::LaunchUriAsync(Uri(L"ms-settings:bluetooth"));
+			return 0;
+		case ID_TRAY_EXIT:
+			PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
+			return 0;
 		}
 		break;
 	case WM_CONNECTDEVICE:
@@ -1006,6 +1521,141 @@ void ShowDevicePickerFromTray()
 	SetForegroundWindow(g_hWnd);
 	RefreshDeviceStatuses(g_devicePicker);
 	g_devicePicker.Show(rect, Placement::Above);
+}
+
+void SetupTrayMenu()
+{
+	if (g_trayMenu)
+	{
+		DestroyMenu(g_trayMenu);
+	}
+
+	g_trayMenu = CreatePopupMenu();
+	FAIL_FAST_LAST_ERROR_IF_NULL(g_trayMenu);
+
+	AppendMenuW(g_trayMenu, MF_STRING, ID_TRAY_OPEN_APP, _(L"AudioPlaybackConnector"));
+	AppendMenuW(g_trayMenu, MF_STRING, ID_TRAY_OPEN_PICKER, _(L"Open device picker"));
+	AppendMenuW(g_trayMenu, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(g_trayMenu, MF_STRING, ID_TRAY_AUTOSTART, _(L"Launch at startup"));
+	AppendMenuW(g_trayMenu, MF_STRING, ID_TRAY_RECONNECT, _(L"Reconnect on next start"));
+	AppendMenuW(g_trayMenu, MF_STRING, ID_TRAY_DUCK, _(L"Reduce other apps while connected"));
+	AppendMenuW(g_trayMenu, MF_STRING, ID_TRAY_STARTUP_TOAST, _(L"Show startup notification"));
+	AppendMenuW(g_trayMenu, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(g_trayMenu, MF_STRING, ID_TRAY_BLUETOOTH_SETTINGS, _(L"Bluetooth Settings"));
+	AppendMenuW(g_trayMenu, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(g_trayMenu, MF_STRING, ID_TRAY_EXIT, _(L"Exit"));
+}
+
+void ShowTrayMenu()
+{
+	if (!g_trayMenu)
+	{
+		return;
+	}
+
+	CheckMenuItem(g_trayMenu, ID_TRAY_AUTOSTART, MF_BYCOMMAND | (g_autoStart ? MF_CHECKED : MF_UNCHECKED));
+	CheckMenuItem(g_trayMenu, ID_TRAY_RECONNECT, MF_BYCOMMAND | (g_reconnect ? MF_CHECKED : MF_UNCHECKED));
+	CheckMenuItem(g_trayMenu, ID_TRAY_DUCK, MF_BYCOMMAND | (g_duckOtherApps ? MF_CHECKED : MF_UNCHECKED));
+	CheckMenuItem(g_trayMenu, ID_TRAY_STARTUP_TOAST, MF_BYCOMMAND | (g_showStartupToast ? MF_CHECKED : MF_UNCHECKED));
+
+	POINT point{};
+	if (!GetCursorPos(&point))
+	{
+		point.x = 100;
+		point.y = 100;
+	}
+
+	SetForegroundWindow(g_hWnd);
+	TrackPopupMenu(g_trayMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, point.x, point.y, 0, g_hWnd, nullptr);
+	PostMessageW(g_hWnd, WM_NULL, 0, 0);
+}
+
+void ShowMainGui(std::wstring_view command)
+{
+	const auto guiPath = ResolveGuiExecutablePath();
+	if (!guiPath.has_value())
+	{
+		AppendBackendDiagnosticLog(L"show-gui: no gui path resolved");
+		SaveRuntimeStateNoThrow(L"show-gui-no-path");
+		TaskDialog(nullptr, nullptr, _(L"Error"), nullptr, _(L"Unknown error"), TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
+		return;
+	}
+	AppendBackendDiagnosticLog(L"show-gui: resolved path=" + guiPath->wstring());
+
+	std::wstring commandLine = L"\"" + guiPath->wstring() + L"\"";
+	if (!command.empty())
+	{
+		commandLine += L" ";
+		commandLine += std::wstring(command);
+	}
+
+	STARTUPINFOW startupInfo{};
+	startupInfo.cb = sizeof(startupInfo);
+	PROCESS_INFORMATION processInfo{};
+	if (!CreateProcessW(
+		nullptr,
+		commandLine.data(),
+		nullptr,
+		nullptr,
+		FALSE,
+		0,
+		nullptr,
+		guiPath->parent_path().c_str(),
+		&startupInfo,
+		&processInfo))
+	{
+		wchar_t reason[64];
+		swprintf_s(reason, L"show-gui-fail-%lu", GetLastError());
+		AppendBackendDiagnosticLog(std::wstring(L"show-gui: CreateProcess failed error=") + std::to_wstring(GetLastError()));
+		SaveRuntimeStateNoThrow(reason);
+		LOG_LAST_ERROR();
+		TaskDialog(nullptr, nullptr, _(L"Error"), nullptr, _(L"Unknown error"), TDCBF_OK_BUTTON, TD_ERROR_ICON, nullptr);
+		return;
+	}
+
+	CloseHandle(processInfo.hThread);
+	CloseHandle(processInfo.hProcess);
+	AppendBackendDiagnosticLog(std::wstring(L"show-gui: launched pid=") + std::to_wstring(processInfo.dwProcessId));
+	SaveRuntimeStateNoThrow(L"show-gui-launch");
+}
+
+void StartBackendPipes()
+{
+	if (!g_backendPipeStopEvent)
+	{
+		g_backendPipeStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		FAIL_FAST_LAST_ERROR_IF_NULL(g_backendPipeStopEvent);
+	}
+
+	ResetEvent(g_backendPipeStopEvent);
+	g_backendCommandPipeThread = std::thread(BackendCommandPipeThreadProc);
+	g_backendEventPipeThread = std::thread(BackendEventPipeThreadProc);
+}
+
+void StopBackendPipes()
+{
+	if (g_backendPipeStopEvent)
+	{
+		SetEvent(g_backendPipeStopEvent);
+		WakeBackendPipeServers();
+	}
+
+	if (g_backendCommandPipeThread.joinable())
+	{
+		g_backendCommandPipeThread.join();
+	}
+	if (g_backendEventPipeThread.joinable())
+	{
+		g_backendEventPipeThread.join();
+	}
+
+	CloseAllBackendEventClients();
+
+	if (g_backendPipeStopEvent)
+	{
+		CloseHandle(g_backendPipeStopEvent);
+		g_backendPipeStopEvent = nullptr;
+	}
 }
 
 void UpdateVolumeText()
@@ -1143,6 +1793,233 @@ void ApplyOutputDeviceRouting(std::wstring_view reason)
 	CATCH_LOG();
 }
 
+void PublishBackendState(std::wstring_view reason, bool isRunning)
+{
+	JsonObject jsonObj;
+	jsonObj.Insert(L"running", JsonValue::CreateBooleanValue(isRunning));
+	jsonObj.Insert(L"reason", JsonValue::CreateStringValue(std::wstring(reason)));
+	jsonObj.Insert(L"processId", JsonValue::CreateNumberValue(GetCurrentProcessId()));
+	jsonObj.Insert(L"reconnect", JsonValue::CreateBooleanValue(g_reconnect));
+	jsonObj.Insert(L"volume", JsonValue::CreateNumberValue(g_volume));
+	jsonObj.Insert(L"duckOtherApps", JsonValue::CreateBooleanValue(g_duckOtherApps));
+	jsonObj.Insert(L"duckedAppsVolume", JsonValue::CreateNumberValue(g_duckedAppsVolume));
+	jsonObj.Insert(L"showStartupToast", JsonValue::CreateBooleanValue(g_showStartupToast));
+	jsonObj.Insert(L"outputDeviceId", JsonValue::CreateStringValue(g_outputDeviceId));
+	jsonObj.Insert(L"activeOutputDeviceId", JsonValue::CreateStringValue(g_activeOutputDeviceId));
+	jsonObj.Insert(L"softReconnectInProgress", JsonValue::CreateBooleanValue(g_outputSwitchSoftReconnectInProgress));
+
+	JsonArray connections;
+	for (const auto& [deviceId, value] : g_audioPlaybackConnections)
+	{
+		JsonObject connection;
+		connection.Insert(L"id", JsonValue::CreateStringValue(deviceId));
+		connection.Insert(L"name", JsonValue::CreateStringValue(std::wstring(value.first.Name())));
+		connection.Insert(L"state", JsonValue::CreateStringValue(ToConnectionStateString(value.second.State())));
+		connection.Insert(L"stateValue", JsonValue::CreateNumberValue(static_cast<int>(value.second.State())));
+		connections.Append(connection);
+	}
+	jsonObj.Insert(L"connections", connections);
+
+	const auto utf16 = jsonObj.Stringify();
+	const auto utf8 = Utf16ToUtf8(utf16);
+
+	const auto path = GetModuleFsPath(g_hInst).remove_filename() / RUNTIME_STATE_NAME;
+	wil::unique_hfile hFile(CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+	THROW_LAST_ERROR_IF(!hFile);
+
+	DWORD written = 0;
+	THROW_IF_WIN32_BOOL_FALSE(WriteFile(hFile.get(), utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr));
+	THROW_HR_IF(E_FAIL, written != utf8.size());
+
+	BroadcastBackendEventUtf8(utf8);
+}
+
+void SaveRuntimeStateNoThrow(std::wstring_view reason, bool isRunning)
+{
+	try
+	{
+		PublishBackendState(reason, isRunning);
+	}
+	CATCH_LOG();
+}
+
+void ReloadSettingsAndApply()
+{
+	const auto previousOutputDeviceId = g_outputDeviceId;
+
+	LoadSettings();
+
+	if (g_volumeSlider)
+	{
+		g_volumeSlider.Value(g_volume * 100.0);
+	}
+	if (g_duckOtherAppsCheckBox)
+	{
+		g_duckOtherAppsCheckBox.IsChecked(g_duckOtherApps);
+	}
+	if (g_duckedAppsVolumeSlider)
+	{
+		g_duckedAppsVolumeSlider.Value(g_duckedAppsVolume * 100.0);
+	}
+	if (g_showStartupToastCheckBox)
+	{
+		g_showStartupToastCheckBox.IsChecked(g_showStartupToast);
+	}
+	UpdateVolumeText();
+	UpdateDuckedAppsVolumeText();
+	RefreshOutputDeviceOptions();
+	UpdateOutputDeviceSelection();
+
+	ApplyOwnSessionVolume(L"external-reload-settings");
+	if (g_duckOtherApps)
+	{
+		ApplyDuckingPolicy();
+	}
+	else
+	{
+		RestoreDuckedSessions();
+	}
+
+	if (previousOutputDeviceId != g_outputDeviceId && !g_audioPlaybackConnections.empty())
+	{
+		const auto snapshotToken = ++g_outputDeviceSnapshotToken;
+		const auto routingToken = ++g_outputRoutingToken;
+		LogRoutingDiagnostics(L"external-settings-pre-route", g_outputDeviceId, false);
+		ApplyOutputDeviceRouting(L"external-settings-pre-route");
+		LogRelevantAudioSessionSnapshotsAfterDelay(L"external-settings-change-delayed", SESSION_SNAPSHOT_DELAY, snapshotToken);
+
+		for (const auto& [connectedDeviceId, value] : g_audioPlaybackConnections)
+		{
+			if (value.second && value.second.State() == AudioPlaybackConnectionState::Opened)
+			{
+				ConfirmOutputRoutingAfterOpen(connectedDeviceId, value.second, L"external-settings-change", true, routingToken);
+			}
+		}
+	}
+
+	SaveRuntimeStateNoThrow(L"reload-settings");
+}
+
+void ExecuteBackendCommand(std::wstring_view serializedCommand)
+{
+	const auto [verb, payload] = ParseBackendCommand(serializedCommand);
+
+	if (_wcsicmp(verb.c_str(), L"picker") == 0)
+	{
+		ShowDevicePickerFromTray();
+		return;
+	}
+
+	if (_wcsicmp(verb.c_str(), L"show-gui") == 0)
+	{
+		ShowMainGui();
+		return;
+	}
+
+	if (_wcsicmp(verb.c_str(), L"exit") == 0)
+	{
+		PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
+		return;
+	}
+
+	if (_wcsicmp(verb.c_str(), L"reload-settings") == 0)
+	{
+		ReloadSettingsAndApply();
+		return;
+	}
+
+	if (_wcsicmp(verb.c_str(), L"publish-state") == 0)
+	{
+		SaveRuntimeStateNoThrow(L"publish-state");
+		return;
+	}
+
+	if (_wcsicmp(verb.c_str(), L"connect") == 0 && !payload.empty())
+	{
+		ConnectDevice(g_devicePicker, payload, L"manual-command");
+		return;
+	}
+
+	if (_wcsicmp(verb.c_str(), L"disconnect") == 0 && !payload.empty())
+	{
+		DisconnectDeviceById(payload);
+		return;
+	}
+}
+
+// Waits until the current-process audio session appears on any active render
+// device, then applies volume and ducking. Used for manual-picker and
+// auto-reconnect sources to avoid the race where ApplyOwnSessionVolume is
+// called before the Bluetooth audio session has been registered by the OS.
+//
+// This path intentionally stays on the stable playback mainline: it only waits
+// for session presence and does not try to confirm or repair output-device
+// routing. Hot output switching remains isolated to the dedicated
+// settings-output-device-change / output-switch-soft-reconnect flow.
+winrt::fire_and_forget WaitForSessionThenApplyVolume(std::wstring deviceId, AudioPlaybackConnection connection, std::wstring source)
+{
+	const auto startedAt = Clock::now();
+
+	while (Clock::now() - startedAt < OUTPUT_CONFIRM_TIMEOUT)
+	{
+		if (!IsCurrentConnection(deviceId, connection) || connection.State() != AudioPlaybackConnectionState::Opened)
+		{
+			co_return;
+		}
+
+		std::optional<CurrentProcessSessionLocation> location;
+		try
+		{
+			location = FindCurrentProcessSessionLocation();
+		}
+		CATCH_LOG();
+
+		wchar_t probeBuf[768];
+		swprintf_s(
+			probeBuf,
+			L"[AudioPlaybackConnector] session-wait source=%.*s device=%.*s found=%d sessionDevice=%.*s active=%d\r\n",
+			static_cast<int>(source.size()), source.data(),
+			static_cast<int>(deviceId.size()), deviceId.data(),
+			location.has_value() ? 1 : 0,
+			location ? static_cast<int>(location->deviceId.size()) : 0,
+			location ? location->deviceId.data() : L"",
+			location ? (location->state == AudioSessionStateActive ? 1 : 0) : 0
+		);
+		OutputDebugStringW(probeBuf);
+
+		if (location.has_value())
+		{
+			ApplyOwnSessionVolume(source + L"-session-wait-success");
+			ApplyDuckingPolicy();
+			LogCurrentProcessPlaybackProbe(source + L"-session-wait-success");
+			LogCurrentProcessPlaybackProbeAfterDelay(source + L"-playback-probe", deviceId, PLAYBACK_PROBE_DELAY);
+			co_return;
+		}
+
+		co_await winrt::resume_after(OUTPUT_CONFIRM_INTERVAL);
+	}
+
+	// Timed out waiting for the session to appear. Apply volume as a best-effort
+	// fallback so the user is not left with a silent connection.
+	if (!IsCurrentConnection(deviceId, connection) || connection.State() != AudioPlaybackConnectionState::Opened)
+	{
+		co_return;
+	}
+
+	wchar_t timeoutBuf[512];
+	swprintf_s(
+		timeoutBuf,
+		L"[AudioPlaybackConnector] session-wait-timeout source=%.*s device=%.*s\r\n",
+		static_cast<int>(source.size()), source.data(),
+		static_cast<int>(deviceId.size()), deviceId.data()
+	);
+	OutputDebugStringW(timeoutBuf);
+
+	ApplyOwnSessionVolume(source + L"-session-wait-timeout-fallback");
+	ApplyDuckingPolicy();
+	LogCurrentProcessPlaybackProbe(source + L"-session-wait-timeout-fallback");
+}
+
 winrt::fire_and_forget ConfirmOutputRoutingAfterOpen(std::wstring deviceId, AudioPlaybackConnection connection, std::wstring source, bool allowSoftReconnect, uint64_t token)
 {
 	const auto startedAt = Clock::now();
@@ -1194,8 +2071,21 @@ winrt::fire_and_forget ConfirmOutputRoutingAfterOpen(std::wstring deviceId, Audi
 	if (allowSoftReconnect && !g_outputSwitchSoftReconnectInProgress)
 	{
 		g_outputSwitchSoftReconnectInProgress = true;
-		co_await SoftReconnectAllConnectionsForOutputSwitch(token);
+		// Re-read g_outputRoutingToken here rather than forwarding the caller's
+		// token: ConnectDevice (called inside SoftReconnectAllConnectionsForOutputSwitch)
+		// does NOT advance the token for the "output-switch-soft-reconnect" source
+		// anymore, so g_outputRoutingToken at this point is the correct sentinel
+		// value to detect a subsequent user-initiated change during the disconnect
+		// wait.
+		co_await SoftReconnectAllConnectionsForOutputSwitch(g_outputRoutingToken);
 		g_outputSwitchSoftReconnectInProgress = false;
+	}
+	else
+	{
+		// Could not do a soft reconnect (either not allowed or already in progress).
+		// Apply volume as a best-effort fallback.
+		ApplyOwnSessionVolume(L"confirm-timeout-no-reconnect-fallback");
+		ApplyDuckingPolicy();
 	}
 }
 
@@ -1230,6 +2120,12 @@ IAsyncAction SoftReconnectAllConnectionsForOutputSwitch(uint64_t token)
 
 	co_await winrt::resume_after(DISCONNECT_TIMEOUT);
 
+	// Abort if a newer user-initiated routing change arrived while we were
+	// waiting for devices to disconnect.  ConnectDevice for the
+	// "output-switch-soft-reconnect" source intentionally does NOT advance
+	// g_outputRoutingToken (see the comment inside ConnectDevice), so the token
+	// we captured just before calling this function remains stable across all
+	// re-open calls below.
 	if (token != g_outputRoutingToken)
 	{
 		co_return;
@@ -1466,10 +2362,12 @@ void SetupSettingsFlyout()
 	g_autoStartCheckBox.Checked([](const auto&, const auto&) {
 		g_autoStart = true;
 		SaveAutoStartSettingNoThrow();
+		SaveRuntimeStateNoThrow(L"autostart-enabled");
 	});
 	g_autoStartCheckBox.Unchecked([](const auto&, const auto&) {
 		g_autoStart = false;
 		SaveAutoStartSettingNoThrow();
+		SaveRuntimeStateNoThrow(L"autostart-disabled");
 	});
 
 	TextBlock outputDeviceLabel;
@@ -1503,12 +2401,14 @@ void SetupSettingsFlyout()
 		if (g_audioPlaybackConnections.empty())
 		{
 			LogRoutingDiagnostics(L"settings-output-device-preference", g_outputDeviceId, false);
+			SaveRuntimeStateNoThrow(L"output-device-preference");
 			return;
 		}
 
 		if (g_outputDeviceId.empty())
 		{
 			LogRoutingDiagnostics(L"settings-output-device-preference", g_outputDeviceId, false);
+			SaveRuntimeStateNoThrow(L"output-device-cleared");
 			return;
 		}
 
@@ -1523,9 +2423,15 @@ void SetupSettingsFlyout()
 		{
 			if (value.second && value.second.State() == AudioPlaybackConnectionState::Opened)
 			{
+				// allowSoftReconnect=true: if the session has not migrated to
+				// the target device within OUTPUT_CONFIRM_TIMEOUT we perform a
+				// soft reconnect.  ConfirmOutputRoutingAfterOpen re-reads
+				// g_outputRoutingToken when it kicks off the soft reconnect so
+				// it is not affected by the token advancement inside ConnectDevice.
 				ConfirmOutputRoutingAfterOpen(connectedDeviceId, value.second, L"settings-output-device-change", true, routingToken);
 			}
 		}
+		SaveRuntimeStateNoThrow(L"output-device-changed");
 	});
 	RefreshOutputDeviceOptions();
 	UpdateOutputDeviceSelection();
@@ -1543,6 +2449,7 @@ void SetupSettingsFlyout()
 		g_volume = std::clamp(args.NewValue() / 100.0, 0.0, 1.0);
 		UpdateVolumeText();
 		ApplyOwnSessionVolume(L"settings-slider");
+		SaveRuntimeStateNoThrow(L"volume-changed");
 	});
 
 	g_volumeValueText = TextBlock();
@@ -1554,10 +2461,12 @@ void SetupSettingsFlyout()
 	g_duckOtherAppsCheckBox.Checked([](const auto&, const auto&) {
 		g_duckOtherApps = true;
 		ApplyDuckingPolicy();
+		SaveRuntimeStateNoThrow(L"ducking-enabled");
 	});
 	g_duckOtherAppsCheckBox.Unchecked([](const auto&, const auto&) {
 		g_duckOtherApps = false;
 		RestoreDuckedSessions();
+		SaveRuntimeStateNoThrow(L"ducking-disabled");
 	});
 
 	TextBlock duckedAppsLabel;
@@ -1573,6 +2482,7 @@ void SetupSettingsFlyout()
 		g_duckedAppsVolume = std::clamp(args.NewValue() / 100.0, 0.0, 1.0);
 		UpdateDuckedAppsVolumeText();
 		ApplyDuckingPolicy();
+		SaveRuntimeStateNoThrow(L"ducked-volume-changed");
 	});
 
 	g_duckedAppsVolumeValueText = TextBlock();
@@ -1583,9 +2493,11 @@ void SetupSettingsFlyout()
 	g_showStartupToastCheckBox.Content(winrt::box_value(_(L"Show startup notification")));
 	g_showStartupToastCheckBox.Checked([](const auto&, const auto&) {
 		g_showStartupToast = true;
+		SaveRuntimeStateNoThrow(L"startup-toast-enabled");
 	});
 	g_showStartupToastCheckBox.Unchecked([](const auto&, const auto&) {
 		g_showStartupToast = false;
+		SaveRuntimeStateNoThrow(L"startup-toast-disabled");
 	});
 
 	StackPanel rootPanel;
@@ -1695,7 +2607,19 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 		uint64_t routingToken = 0;
 		if (ShouldApplyPreOpenRouting(source) || ShouldConfirmOutputRouting(source))
 		{
-			routingToken = ++g_outputRoutingToken;
+			// For "output-switch-soft-reconnect" the token is owned by
+			// SoftReconnectAllConnectionsForOutputSwitch which captured it just
+			// before calling us.  Incrementing it here would invalidate the
+			// post-disconnect guard in that function, so we read the current
+			// value without advancing it.
+			if (source != L"output-switch-soft-reconnect")
+			{
+				routingToken = ++g_outputRoutingToken;
+			}
+			else
+			{
+				routingToken = g_outputRoutingToken;
+			}
 		}
 
 		auto lastClose = g_lastCloseTime.find(deviceId);
@@ -1741,21 +2665,25 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 					}
 					if (routingToken != 0 && ShouldConfirmOutputRouting(source))
 					{
+						// Confirm that the session migrated to the target device.
+						// allowSoftReconnect=false here because the soft-reconnect
+						// path (settings-output-device-change -> ConfirmOutputRoutingAfterOpen
+						// with allowSoftReconnect=true) is handled on the connect-success
+						// path below, not inside StateChanged.
 						ConfirmOutputRoutingAfterOpen(deviceId, sender, source, false, routingToken);
+					}
+					else if (ShouldWaitForSessionBeforeApplyingVolume(source))
+					{
+						// Wait for the OS to register the Bluetooth audio session before
+						// applying volume so we don't silently lose the volume set.
+						WaitForSessionThenApplyVolume(deviceId, sender, source);
 					}
 					else
 					{
 						ApplyOwnSessionVolume(L"state-opened");
 						ApplyDuckingPolicy();
-						if (source == L"manual-picker")
-						{
-							LogCurrentProcessPlaybackProbe(L"manual-state-opened");
-						}
-						else if (source == L"auto-reconnect")
-						{
-							LogCurrentProcessPlaybackProbe(L"auto-reconnect-state-opened");
-						}
 					}
+					SaveRuntimeStateNoThrow(L"connection-opened");
 				}
 				else if (state == AudioPlaybackConnectionState::Closed)
 				{
@@ -1776,6 +2704,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 						ApplyOwnSessionVolume(L"state-closed-empty");
 						RestoreDuckedSessions();
 					}
+					SaveRuntimeStateNoThrow(L"connection-closed");
 				}
 			});
 
@@ -1837,17 +2766,22 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 		{
 			ApplyOwnSessionVolume(L"connect-success");
 			ApplyDuckingPolicy();
-			if (source == L"manual-picker")
-			{
-				LogCurrentProcessPlaybackProbe(L"manual-open-success");
-				LogCurrentProcessPlaybackProbeAfterDelay(L"manual-playback-probe", deviceId, PLAYBACK_PROBE_DELAY);
-			}
-			else if (source == L"auto-reconnect")
-			{
-				LogCurrentProcessPlaybackProbe(L"auto-reconnect-open-success");
-				LogCurrentProcessPlaybackProbeAfterDelay(L"auto-reconnect-playback-probe", deviceId, PLAYBACK_PROBE_DELAY);
-			}
 		}
+		else if (source == L"manual-picker" || source == L"auto-reconnect")
+		{
+			// Volume / ducking will be applied once the session appears; the
+			// WaitForSessionThenApplyVolume coroutine launched from StateChanged
+			// handles this.  Log a probe at the open-success point for correlation.
+			LogCurrentProcessPlaybackProbe(source == L"manual-picker" ? L"manual-open-success" : L"auto-reconnect-open-success");
+		}
+		else
+		{
+			// output-switch-soft-reconnect and settings-output-device-change:
+			// volume / ducking are handled by ConfirmOutputRoutingAfterOpen once
+			// the session has migrated to the target device.
+			LogCurrentProcessPlaybackProbe(L"routed-open-success");
+		}
+		SaveRuntimeStateNoThrow(L"connect-success");
 	}
 	else
 	{
@@ -1875,6 +2809,7 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, DeviceInformation devi
 			ApplyOwnSessionVolume(L"connect-failure-empty");
 			RestoreDuckedSessions();
 		}
+		SaveRuntimeStateNoThrow(L"connect-failure");
 		picker.SetDisplayStatus(device, errorMessage, DevicePickerDisplayStatusOptions::ShowRetryButton);
 	}
 }
@@ -1914,6 +2849,7 @@ winrt::fire_and_forget DisconnectDevice(DevicePicker picker, DeviceInformation d
 		ApplyOwnSessionVolume(L"disconnect-empty");
 		RestoreDuckedSessions();
 	}
+	SaveRuntimeStateNoThrow(L"disconnect");
 }
 
 winrt::fire_and_forget RefreshDeviceStatuses(DevicePicker picker)
@@ -1944,6 +2880,12 @@ winrt::fire_and_forget ConnectDevice(DevicePicker picker, std::wstring_view devi
 {
 	auto device = co_await DeviceInformation::CreateFromIdAsync(deviceId);
 	ConnectDevice(picker, device, connectionSource);
+}
+
+winrt::fire_and_forget DisconnectDeviceById(std::wstring_view deviceId)
+{
+	auto device = co_await DeviceInformation::CreateFromIdAsync(deviceId);
+	DisconnectDevice(g_devicePicker, device);
 }
 
 void SetupDevicePicker()
